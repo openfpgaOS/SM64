@@ -1,0 +1,63 @@
+# Quartus project files at root (symlinks/copies)
+db/
+incremental_db/
+*.rpt
+*.summary
+*.qws
+*.bak
+
+# Archives
+*.zip
+
+# ROM files (copyrighted, do not distribute)
+*.z64
+src/firmware/sm64/baserom.*
+
+# Firmware build outputs
+src/firmware/**/*.o
+src/firmware/*.o
+src/firmware/*.elf
+src/firmware/*.bin
+src/firmware/*.map
+src/firmware/*.lst
+src/firmware/*.mif
+
+# SM64 generated assets (from make extract/generate, requires ROM)
+src/firmware/sm64/build/
+
+# Firmware test build outputs
+src/firmware_test/*.o
+src/firmware_test/*.elf
+src/firmware_test/*.bin
+src/firmware_test/*.map
+src/firmware_test/*.mif
+
+# FPGA build outputs
+src/fpga/output_files/
+src/fpga/db/
+src/fpga/incremental_db/
+src/fpga/simulation/
+src/fpga/greybox_tmp/
+src/fpga/*.qws
+src/fpga/*.bak
+src/fpga/core/firmware.mif
+
+# Release build outputs
+release/
+
+# VexRiscv upstream repo (separate git repo, clone manually)
+src/fpga/vexriscv/VexRiscv/
+
+# Build tools
+reverse_bits
+
+# Editor/IDE
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+.claude/
+
+# macOS
+.DS_Store

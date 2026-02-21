@@ -1,0 +1,18 @@
+{
+    "data": {
+        "magic": "APF_VER_1",
+        "data_slots": [
+            {
+                "id": 0,
+                "name": "SM64 Binary",
+                "required": true,
+                "parameters": 0,
+                "extensions": [
+                    "bin"
+                ],
+                "filename": "sm64.bin",
+                "address": "0x00200000"
+            }
+        ]
+    }
+}

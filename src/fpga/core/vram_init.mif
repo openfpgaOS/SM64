@@ -1,0 +1,52 @@
+-- VRAM initialization - shows "HELLO" at startup for testing
+-- 40x30 characters = 1200 bytes = 300 x 32-bit words
+-- Each word contains 4 characters (little-endian byte order):
+--   bits [7:0] = char at position n*4
+--   bits [15:8] = char at position n*4+1
+--   bits [23:16] = char at position n*4+2
+--   bits [31:24] = char at position n*4+3
+
+WIDTH=32;
+DEPTH=300;
+
+ADDRESS_RADIX=DEC;
+DATA_RADIX=HEX;
+
+CONTENT BEGIN
+-- Line 0: "HELLO VIDEO TEST"
+-- Positions 0-3: "HELL" -> 0x4C4C4548
+-- Positions 4-7: "O VI" -> 0x5649204F
+-- Positions 8-11: "DEO " -> 0x204F4544
+-- Positions 12-15: "TEST" -> 0x54534554
+0 : 4C4C4548;
+1 : 5649204F;
+2 : 204F4544;
+3 : 54534554;
+-- Rest of line 0 (positions 16-39) = spaces
+[4..9] : 20202020;
+
+-- Line 1: "IF YOU SEE THIS"
+-- Positions 40-43: "IF Y" -> 0x59204649
+-- Positions 44-47: "OU S" -> 0x5320554F
+-- Positions 48-51: "EE T" -> 0x54204545
+-- Positions 52-55: "HIS " -> 0x20534948
+10 : 59204649;
+11 : 5320554F;
+12 : 54204545;
+13 : 20534948;
+[14..19] : 20202020;
+
+-- Line 2: "VIDEO WORKS OK!"
+-- Positions 80-83: "VIDE" -> 0x45444956
+-- Positions 84-87: "O WO" -> 0x4F57204F
+-- Positions 88-91: "RKS " -> 0x20534B52
+-- Positions 92-95: "OK! " -> 0x20214B4F
+20 : 45444956;
+21 : 4F57204F;
+22 : 20534B52;
+23 : 20214B4F;
+[24..29] : 20202020;
+
+-- Rest of screen = spaces
+[30..299] : 20202020;
+END;
