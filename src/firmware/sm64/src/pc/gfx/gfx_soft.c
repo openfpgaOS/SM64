@@ -193,12 +193,21 @@ static int scr_width;
 static int scr_height;
 static int scr_size; // scr_width * scr_height
 
+#ifdef TARGET_POCKET
+// Replace 64KB mult_tab + 131KB lerp_tab with inline multiplies.
+// VexRiscv M-extension mul is 1 cycle — faster than cache-competing LUT loads.
+#define MULT_U8(x, y)        ((uint8_t)(((unsigned)(x) * (unsigned)(y)) >> 8))
+#define LERP_U8(c1, c2, t)   ((uint8_t)((c1) + (((int)(t) * ((int)(c2) - (int)(c1))) >> 8)))
+#else
 // color component interpolation table:
 // lerp(x, y, t) = x + (y - x) * t
 // the first index is x, the second is (y - x) + 256
 static uint8_t lerp_tab[256][256 * 2 + 1];
 // color component multiplication table: [x][y] = (x * y) / 256;
 static uint8_t mult_tab[256][256];
+#define MULT_U8(x, y)        mult_tab[x][y]
+#define LERP_U8(c1, c2, t)   ((c1) + lerp_tab[t][0xFF + (c2) - (c1)])
+#endif
 // dither kernel for unreal texture filtering
 static const Vector2 dither_tab[2][2] = {
     { {{ RV_LITERAL(0.25f), RV_LITERAL(0.00f) }}, {{ RV_LITERAL(0.50f), RV_LITERAL(0.75f) }} },
@@ -250,29 +259,29 @@ static inline Vector4 vec4_lerp(const Vector4 *v1, const Vector4 *v2, const rv_t
 
 static inline Color4 rgba_modulate(const Color4 c1, const Color4 c2) {
     return (Color4) {{
-        .r = mult_tab[c1.r][c2.r],
-        .g = mult_tab[c1.g][c2.g],
-        .b = mult_tab[c1.b][c2.b],
-        .a = mult_tab[c1.a][c2.a],
+        .r = MULT_U8(c1.r, c2.r),
+        .g = MULT_U8(c1.g, c2.g),
+        .b = MULT_U8(c1.b, c2.b),
+        .a = MULT_U8(c1.a, c2.a),
     }};
 }
 
 static inline Color4 rgba_blend(const Color4 src, const Color4 dst, const uint8_t a) {
     const uint8_t ia = 0xFF - a;
     return (Color4) {{
-        .r = mult_tab[src.r][a] + mult_tab[dst.r][ia],
-        .g = mult_tab[src.g][a] + mult_tab[dst.g][ia],
-        .b = mult_tab[src.b][a] + mult_tab[dst.b][ia],
+        .r = MULT_U8(src.r, a) + MULT_U8(dst.r, ia),
+        .g = MULT_U8(src.g, a) + MULT_U8(dst.g, ia),
+        .b = MULT_U8(src.b, a) + MULT_U8(dst.b, ia),
         .a = dst.a,
     }};
 }
 
 static inline Color4 rgba_lerp(const Color4 c1, const Color4 c2, const uint8_t t) {
     return (Color4) {{
-        .r = c1.r + lerp_tab[t][0xFF + c2.r - c1.r],
-        .g = c1.g + lerp_tab[t][0xFF + c2.g - c1.g],
-        .b = c1.b + lerp_tab[t][0xFF + c2.b - c1.b],
-        .a = c1.a + lerp_tab[t][0xFF + c2.a - c1.a],
+        .r = LERP_U8(c1.r, c2.r, t),
+        .g = LERP_U8(c1.g, c2.g, t),
+        .b = LERP_U8(c1.b, c2.b, t),
+        .a = LERP_U8(c1.a, c2.a, t),
     }};
 }
 
@@ -476,9 +485,9 @@ static void draw_pixel_blend(const int idx, UNUSED const uint16_t z, Color4 src)
     const uint8_t a = src.a;
     const uint8_t ia = 255 - a;
     const Color4 dst = (Color4) { .c = gfx_output[idx] };
-    src.r = mult_tab[src.r][a] + mult_tab[dst.r][ia];
-    src.g = mult_tab[src.g][a] + mult_tab[dst.g][ia];
-    src.b = mult_tab[src.b][a] + mult_tab[dst.b][ia];
+    src.r = MULT_U8(src.r, a) + MULT_U8(dst.r, ia);
+    src.g = MULT_U8(src.g, a) + MULT_U8(dst.g, ia);
+    src.b = MULT_U8(src.b, a) + MULT_U8(dst.b, ia);
     gfx_output[idx] = src.c;
 }
 
@@ -486,9 +495,9 @@ static void draw_pixel_blend_zwrite(const int idx, const uint16_t z, Color4 src)
     const uint8_t a = src.a;
     const uint8_t ia = 255 - a;
     const Color4 dst = (Color4) { .c = gfx_output[idx] };
-    src.r = mult_tab[src.r][a] + mult_tab[dst.r][ia];
-    src.g = mult_tab[src.g][a] + mult_tab[dst.g][ia];
-    src.b = mult_tab[src.b][a] + mult_tab[dst.b][ia];
+    src.r = MULT_U8(src.r, a) + MULT_U8(dst.r, ia);
+    src.g = MULT_U8(src.g, a) + MULT_U8(dst.g, ia);
+    src.b = MULT_U8(src.b, a) + MULT_U8(dst.b, ia);
     gfx_output[idx] = src.c;
     z_buffer[idx] = z;
 }
@@ -498,9 +507,9 @@ static void draw_pixel_blend_edge(const int idx, UNUSED const uint16_t z, Color4
         const uint8_t a = src.a;
         const uint8_t ia = 255 - a;
         const Color4 dst = (Color4) { .c = gfx_output[idx] };
-        src.r = mult_tab[src.r][a] + mult_tab[dst.r][ia];
-        src.g = mult_tab[src.g][a] + mult_tab[dst.g][ia];
-        src.b = mult_tab[src.b][a] + mult_tab[dst.b][ia];
+        src.r = MULT_U8(src.r, a) + MULT_U8(dst.r, ia);
+        src.g = MULT_U8(src.g, a) + MULT_U8(dst.g, ia);
+        src.b = MULT_U8(src.b, a) + MULT_U8(dst.b, ia);
         gfx_output[idx] = src.c;
     }
 }
@@ -510,9 +519,9 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
         const uint8_t a = src.a;
         const uint8_t ia = 255 - a;
         const Color4 dst = (Color4) { .c = gfx_output[idx] };
-        src.r = mult_tab[src.r][a] + mult_tab[dst.r][ia];
-        src.g = mult_tab[src.g][a] + mult_tab[dst.g][ia];
-        src.b = mult_tab[src.b][a] + mult_tab[dst.b][ia];
+        src.r = MULT_U8(src.r, a) + MULT_U8(dst.r, ia);
+        src.g = MULT_U8(src.g, a) + MULT_U8(dst.g, ia);
+        src.b = MULT_U8(src.b, a) + MULT_U8(dst.b, ia);
         gfx_output[idx] = src.c;
         z_buffer[idx] = z;
     }
@@ -716,7 +725,7 @@ static inline void gfx_soft_pick_draw_func(void);
                 int vr = RV_TO_INT(RV_MUL(p[6], w)); if (vr < 0) vr = 0; else if (vr > 255) vr = 255; \
                 int vg = RV_TO_INT(RV_MUL(p[7], w)); if (vg < 0) vg = 0; else if (vg > 255) vg = 255; \
                 int vb = RV_TO_INT(RV_MUL(p[8], w)); if (vb < 0) vb = 0; else if (vb > 255) vb = 255; \
-                gfx_output[idx] = (Color4){{ .r = mult_tab[tc.r][(uint8_t)vr], .g = mult_tab[tc.g][(uint8_t)vg], .b = mult_tab[tc.b][(uint8_t)vb], .a = 0xFF }}.c; \
+                gfx_output[idx] = (Color4){{ .r = MULT_U8(tc.r, (uint8_t)vr), .g = MULT_U8(tc.g, (uint8_t)vg), .b = MULT_U8(tc.b, (uint8_t)vb), .a = 0xFF }}.c; \
                 if (z_write) z_buffer[idx] = uz; \
             } \
             for (i = 2; i < nprops; ++i) p[i] += dp_x[i]; \
@@ -771,18 +780,18 @@ static void rast_fast_texrgb_zwrite(const struct Tri tri) {
                 int vb = RV_TO_INT(RV_MUL(p[8], w)); if (vb < 0) vb = 0; else if (vb > 255) vb = 255; \
                 int va = RV_TO_INT(RV_MUL(p[9], w)); if (va < 0) va = 0; else if (va > 255) va = 255; \
                 Color4 src; \
-                src.r = mult_tab[tc.r][(uint8_t)vr]; \
-                src.g = mult_tab[tc.g][(uint8_t)vg]; \
-                src.b = mult_tab[tc.b][(uint8_t)vb]; \
-                src.a = mult_tab[tc.a][(uint8_t)va]; \
+                src.r = MULT_U8(tc.r, (uint8_t)vr); \
+                src.g = MULT_U8(tc.g, (uint8_t)vg); \
+                src.b = MULT_U8(tc.b, (uint8_t)vb); \
+                src.a = MULT_U8(tc.a, (uint8_t)va); \
                 /* blend_edge: only draw if alpha > 50% */ \
                 if (src.a > 0x80) { \
                     const uint8_t a = src.a; \
                     const uint8_t ia = 255 - a; \
                     const Color4 dst = (Color4){ .c = gfx_output[idx] }; \
-                    src.r = mult_tab[src.r][a] + mult_tab[dst.r][ia]; \
-                    src.g = mult_tab[src.g][a] + mult_tab[dst.g][ia]; \
-                    src.b = mult_tab[src.b][a] + mult_tab[dst.b][ia]; \
+                    src.r = MULT_U8(src.r, a) + MULT_U8(dst.r, ia); \
+                    src.g = MULT_U8(src.g, a) + MULT_U8(dst.g, ia); \
+                    src.b = MULT_U8(src.b, a) + MULT_U8(dst.b, ia); \
                     gfx_output[idx] = src.c; \
                     if (z_write) z_buffer[idx] = uz; \
                 } \
@@ -1306,6 +1315,7 @@ static void gfx_soft_tex_rect(int x0, int y0, int x1, int y1, const float u0, co
 }
 
 static void gfx_soft_prepare_tables(void) {
+#ifndef TARGET_POCKET
     for (int t = 0; t < 0x100; ++t) {
         for (int i = 0, sum = 0; i < 0x100; ++i, sum += t) {
             lerp_tab[t][0xFF - i] = (uint8_t)(-sum >> 8);
@@ -1316,6 +1326,7 @@ static void gfx_soft_prepare_tables(void) {
     for (int x = 0; x < 0x100; ++x)
         for (int y = 0; y < 0x100; ++y)
             mult_tab[x][y] = (x * y) >> 8;
+#endif
 }
 
 static void gfx_soft_set_resolution(const int width, const int height) {
