@@ -4,19 +4,21 @@ import vexriscv._
 import vexriscv.plugin._
 import spinal.core._
 
-// Q16.16 fixed-point multiply, multiply-accumulate, reciprocal, and clamp instructions.
+// Q16.16 fixed-point multiply, multiply-accumulate, reciprocal, rsqrt, clamp, and divide.
 // Uses RISC-V custom-0 opcode space (0x0B), R-type encoding.
 //
-// FXMUL   rd, rs1, rs2  (funct3=000): rd = (rs1 * rs2) >> 16
-// FXMACS  rs1, rs2      (funct3=001): acc += (rs1 * rs2) >> 16
-// FXMACR  rd            (funct3=010): rd = acc[31:0]; acc = 0
-// FXRCP   rd, rs1       (funct3=011): rd = (1 << 32) / rs1  (Q16.16 reciprocal)
-// FXCLAMP rd, rs1, rs2  (funct3=100): rd = max(0, min(rs1, rs2))  (signed clamp to [0, rs2])
+// FXMUL    rd, rs1, rs2  (funct3=000): rd = (rs1 * rs2) >> 16
+// FXMACS   rs1, rs2      (funct3=001): acc += (rs1 * rs2) >> 16
+// FXMACR   rd            (funct3=010): rd = acc[31:0]; acc = 0
+// FXRCP    rd, rs1       (funct3=011): rd = (1 << 32) / rs1  (Q16.16 reciprocal)
+// FXCLAMP  rd, rs1, rs2  (funct3=100): rd = max(0, min(rs1, rs2))  (signed clamp to [0, rs2])
+// FXRSQRT  rd, rs1       (funct3=101): rd = 1/sqrt(rs1)  (Q16.16 inverse square root)
+// FXDIV    rd, rs1, rs2  (funct3=110): rd = ((int64_t)rs1 << 16) / rs2  (Q16.16 division)
 //
 // Pipeline: multiply DECOMPOSED into 17x17 partial products in execute stage,
 // combined in memory stage.  Matches VexRiscv MulPlugin decomposition pattern
 // so each partial product maps to one 18x18 DSP block on Cyclone V.
-// FXMUL/FXMACR/FXRCP results are bypassable from memory stage.
+// FXMUL/FXMACR/FXRCP/FXRSQRT/FXDIV results are bypassable from memory stage.
 //
 // FXRCP implementation (5-cycle latency: 3 execute + memory + writeback):
 //   Execute cycle 0: absolute value, CLZ -> local registers (~6ns)
@@ -25,6 +27,20 @@ import spinal.core._
 //   Execute cycle 2: Newton-Raphson correction: y1 = y0 * (2 - x_norm * y0)
 //                     via DSP (16x16 -> 32) -> pipeline stageables (~5ns)
 //   Memory stage:    de-normalize by barrel shift, saturate, apply sign (~4ns)
+//
+// FXRSQRT implementation (3-cycle latency: 2 execute + memory):
+//   Execute cycle 0: CLZ -> local register (~6ns)
+//   Execute cycle 1: even-normalize (barrel shift), 512-entry LUT lookup -> stageables (~6ns)
+//   Memory stage:    de-normalize by half-shift, handle zero/negative (~4ns)
+//   Uses no DSP blocks; 512-entry LUT provides ~9 bits of precision (sufficient for
+//   vector normalization → 8-bit lighting colors).
+//
+// FXDIV implementation (35-cycle latency: 34 execute + memory):
+//   Execute cycle 0: absolute values, overflow check -> local registers
+//   Execute cycles 1-32: restoring division loop (1 quotient bit per cycle)
+//   Execute cycle 33: writeback registered quotient to stageables
+//   Memory stage:    apply sign, handle zero/overflow, saturate
+//   Uses 0 DSP blocks, ~150 ALMs (33-bit subtractor + registers).
 
 class FixedPointMacPlugin extends Plugin[VexRiscv] {
 
@@ -34,6 +50,8 @@ class FixedPointMacPlugin extends Plugin[VexRiscv] {
   object IS_FXMACR  extends Stageable(Bool)
   object IS_FXRCP   extends Stageable(Bool)
   object IS_FXCLAMP extends Stageable(Bool)
+  object IS_FXRSQRT extends Stageable(Bool)
+  object IS_FXDIV   extends Stageable(Bool)
 
   // Pipelined partial products: execute -> memory
   // Decomposition: a = aHigh * 2^16 + aULow, b = bHigh * 2^16 + bULow
@@ -49,6 +67,17 @@ class FixedPointMacPlugin extends Plugin[VexRiscv] {
   object RCP_SIGN     extends Stageable(Bool)           // sign of input
   object RCP_ZERO     extends Stageable(Bool)           // input was zero
 
+  // FXRSQRT pipeline stageables: execute -> memory
+  object RSQRT_Y0      extends Stageable(UInt(16 bits))  // LUT value
+  object RSQRT_HALFCLZ extends Stageable(UInt(4 bits))   // evenClz / 2
+  object RSQRT_ZERO    extends Stageable(Bool)           // input was zero or negative
+
+  // FXDIV pipeline stageables: execute -> memory
+  object DIV_QUOTIENT  extends Stageable(UInt(32 bits))  // unsigned quotient
+  object DIV_SIGN      extends Stageable(Bool)           // result sign
+  object DIV_ZERO      extends Stageable(Bool)           // divisor was zero
+  object DIV_OVERFLOW  extends Stageable(Bool)           // result overflows 31 bits
+
   override def setup(pipeline: VexRiscv): Unit = {
     import pipeline.config._
 
@@ -59,6 +88,8 @@ class FixedPointMacPlugin extends Plugin[VexRiscv] {
     decoderService.addDefault(IS_FXMACR, False)
     decoderService.addDefault(IS_FXRCP, False)
     decoderService.addDefault(IS_FXCLAMP, False)
+    decoderService.addDefault(IS_FXRSQRT, False)
+    decoderService.addDefault(IS_FXDIV, False)
 
     // FXMUL rd, rs1, rs2
     // funct7=0000000, funct3=000, opcode=0001011
@@ -129,6 +160,37 @@ class FixedPointMacPlugin extends Plugin[VexRiscv] {
         RS2_USE -> True
       )
     )
+
+    // FXRSQRT rd, rs1 (rs2 ignored, should be x0)
+    // funct7=0000000, funct3=101, opcode=0001011
+    // rd = 1/sqrt(rs1)  (Q16.16 inverse square root via 512-entry LUT)
+    decoderService.add(
+      M"0000000----------101-----0001011",
+      List(
+        IS_FXRSQRT           -> True,
+        REGFILE_WRITE_VALID  -> True,
+        BYPASSABLE_EXECUTE_STAGE -> False,
+        BYPASSABLE_MEMORY_STAGE  -> True,
+        RS1_USE -> True,
+        RS2_USE -> False
+      )
+    )
+
+    // FXDIV rd, rs1, rs2
+    // funct7=0000000, funct3=110, opcode=0001011
+    // rd = ((int64_t)rs1 << 16) / rs2   (Q16.16 division)
+    // Division by zero returns 0x7FFFFFFF. Overflow saturates.
+    decoderService.add(
+      M"0000000----------110-----0001011",
+      List(
+        IS_FXDIV             -> True,
+        REGFILE_WRITE_VALID  -> True,
+        BYPASSABLE_EXECUTE_STAGE -> False,
+        BYPASSABLE_MEMORY_STAGE  -> True,
+        RS1_USE -> True,
+        RS2_USE -> True
+      )
+    )
   }
 
   override def build(pipeline: VexRiscv): Unit = {
@@ -148,6 +210,20 @@ class FixedPointMacPlugin extends Plugin[VexRiscv] {
       val x_real = 1.0 + (i + 0.5) / 256.0
       val rcp = math.round(65536.0 / x_real).toInt
       BigInt(if (rcp > 0xFFFF) 0xFFFF else rcp)
+    }.toArray
+
+    // Inverse square root LUT: 512 entries of Q0.16 values.
+    // After even-CLZ normalization, input is in [0x40000000, 0xFFFFFFFF].
+    // Index = bits [31:23] (9 bits). Indices 0-127 unused, 128-511 active.
+    // LUT[i] = round(2^30 / sqrt((2*i + 1) * 2^22))
+    val rsqrtLut = Mem(UInt(16 bits), 512)
+    rsqrtLut.initialContent = (0 until 512).map { i =>
+      if (i < 128) BigInt(0)
+      else {
+        val nval = (2.0 * i + 1.0) * (1 << 22).toDouble
+        val rsqrt = math.round(math.pow(2, 30) / math.sqrt(nval)).toInt
+        BigInt(if (rsqrt > 0xFFFF) 0xFFFF else rsqrt)
+      }
     }.toArray
 
     // Execute stage: compute partial products for FXMUL/FXMACS (pipelined to memory),
@@ -226,6 +302,11 @@ class FixedPointMacPlugin extends Plugin[VexRiscv] {
       insert(RCP_SIGN)  := False
       insert(RCP_ZERO)  := False
 
+      // Default values for FXRSQRT pipeline stageables
+      insert(RSQRT_Y0)      := U(0, 16 bits)
+      insert(RSQRT_HALFCLZ) := U(0, 4 bits)
+      insert(RSQRT_ZERO)    := False
+
       when(arbitration.isValid && input(IS_FXRCP)) {
         when(rcpPhase === 0) {
           // Cycle 0: abs + CLZ -> registers, stall
@@ -262,6 +343,122 @@ class FixedPointMacPlugin extends Plugin[VexRiscv] {
         val clamped = Mux(val_s < S(0, 32 bits), S(0, 32 bits),
                       Mux(val_s > max_s, max_s, val_s))
         output(REGFILE_WRITE_DATA) := clamped.asBits
+      }
+
+      // --- FXRSQRT 2-cycle execute stage ---
+      // Cycle 0: CLZ -> local register, stall
+      // Cycle 1: even-normalize + 512-entry LUT lookup -> pipeline stageables
+      val rsqrtPhase = Reg(Bool) init(False)
+
+      // Cycle 0 -> Cycle 1 registers
+      val rsqrtClzReg  = Reg(UInt(5 bits))
+      val rsqrtAbsReg  = Reg(UInt(32 bits))
+      val rsqrtZeroReg = Reg(Bool)
+
+      // Cycle 1 combinational: even-normalize + LUT lookup
+      val rsqrtEvenClz = rsqrtClzReg & U(0x1E, 5 bits)    // clz & ~1 (round down to even)
+      val rsqrtNormalized = rsqrtAbsReg |<< rsqrtEvenClz
+      val rsqrtLutIdx = rsqrtNormalized(31 downto 23)       // 9-bit index
+      val rsqrtY0 = rsqrtLut.readAsync(rsqrtLutIdx)
+      val rsqrtHalfClz = (rsqrtEvenClz >> 1).resize(4)     // evenClz / 2, range 0..15
+
+      when(arbitration.isValid && input(IS_FXRSQRT)) {
+        when(!rsqrtPhase) {
+          // Cycle 0: CLZ + abs -> registers, stall
+          rsqrtAbsReg  := absVal
+          rsqrtClzReg  := clz
+          rsqrtZeroReg := isZero || isNeg   // negative/zero -> return 0x7FFFFFFF
+          rsqrtPhase   := True
+          arbitration.haltItself := True
+        } otherwise {
+          // Cycle 1: normalize + LUT -> stageables, proceed to memory
+          insert(RSQRT_Y0)      := rsqrtY0
+          insert(RSQRT_HALFCLZ) := rsqrtHalfClz
+          insert(RSQRT_ZERO)    := rsqrtZeroReg
+        }
+      }
+
+      // Reset rsqrt state when instruction advances or is flushed
+      when(!arbitration.isStuck || arbitration.removeIt) {
+        rsqrtPhase := False
+      }
+
+      // --- FXDIV multi-cycle execute stage ---
+      // Sequential restoring division: rd = ((int64_t)rs1 << 16) / rs2
+      // 35-cycle latency: 1 setup + 32 division steps + 1 register latch + memory.
+      // Uses ~150 ALMs (48-bit subtractor, registers, control), 0 DSP, 0 BRAM.
+      val divCounter = Reg(UInt(6 bits)) init(0)
+
+      // Division state registers
+      val divRemainder  = Reg(UInt(33 bits))   // partial remainder (33 bits for subtract borrow)
+      val divDividend   = Reg(UInt(32 bits))   // remaining dividend bits to shift in
+      val divQuotient   = Reg(UInt(32 bits))   // accumulated quotient bits
+      val divDivisor    = Reg(UInt(32 bits))   // |rs2|
+      val divSignReg    = Reg(Bool)
+      val divZeroReg    = Reg(Bool)
+      val divOverflowReg = Reg(Bool)
+
+      // Default values for pipeline stageables
+      insert(DIV_QUOTIENT) := U(0, 32 bits)
+      insert(DIV_SIGN)     := False
+      insert(DIV_ZERO)     := False
+      insert(DIV_OVERFLOW) := False
+
+      when(arbitration.isValid && input(IS_FXDIV)) {
+        when(divCounter === 0) {
+          // Setup: compute absolute values, check zero/overflow, initialize
+          val aSign = a.msb
+          val bSign = b.msb
+          val aAbs = Mux(aSign, (-a).asUInt, a.asUInt)
+          val bAbs = Mux(bSign, (-b).asUInt, b.asUInt)
+
+          // Dividend = |a| << 16: upper 16 bits go to remainder, lower 32 to dividend reg
+          divRemainder  := aAbs(31 downto 16).resize(33)
+          divDividend   := (aAbs(15 downto 0) ## U(0, 16 bits)).asUInt
+          divQuotient   := U(0)
+          divDivisor    := bAbs
+          divSignReg    := aSign ^ bSign
+          divZeroReg    := (b === 0)
+          // Overflow check: if upper 16 bits of |a| >= |b|, quotient > 32 bits
+          divOverflowReg := (aAbs(31 downto 16).resize(32) >= bAbs) && (b =/= 0)
+
+          divCounter := 1
+          arbitration.haltItself := True
+        } elsewhen(divCounter <= 32) {
+          // Division step: shift-and-subtract (restoring division)
+          // Shift remainder left by 1, bring in next dividend MSB
+          val shiftedRem = (divRemainder(31 downto 0) ## divDividend.msb).asUInt
+          val diff = shiftedRem - divDivisor.resize(33)
+
+          when(!diff.msb) {
+            // remainder >= divisor: subtract and set quotient bit
+            divRemainder := diff
+            divQuotient  := (divQuotient(30 downto 0) ## True).asUInt
+          } otherwise {
+            // remainder < divisor: keep remainder, clear quotient bit
+            divRemainder := shiftedRem
+            divQuotient  := (divQuotient(30 downto 0) ## False).asUInt
+          }
+
+          divDividend := (divDividend |<< 1).resize(32)
+          divCounter  := divCounter + 1
+
+          // Halt through ALL 32 division steps (counter 1..32)
+          // On counter=32 the last quotient bit is computed and latched at clock edge
+          arbitration.haltItself := True
+        } elsewhen(divCounter === 33) {
+          // Writeback cycle: divQuotient register now has all 32 bits latched
+          // Write to pipeline stageables and release (no halt)
+          insert(DIV_QUOTIENT) := divQuotient
+          insert(DIV_SIGN)     := divSignReg
+          insert(DIV_ZERO)     := divZeroReg
+          insert(DIV_OVERFLOW) := divOverflowReg
+        }
+      }
+
+      // Reset division state when instruction advances or is flushed
+      when(!arbitration.isStuck || arbitration.removeIt) {
+        divCounter := 0
       }
     }
 
@@ -332,6 +529,54 @@ class FixedPointMacPlugin extends Plugin[VexRiscv] {
           S(0x7FFFFFFF, 32 bits),
           Mux(sign, -resultClamped.asSInt, resultClamped.asSInt)
         )
+
+        output(REGFILE_WRITE_DATA) := signedResult.asBits
+      }
+
+      // --- FXRSQRT memory stage: de-normalize + zero handling ---
+      when(input(IS_FXRSQRT)) {
+        val y0      = input(RSQRT_Y0)       // 16-bit LUT value
+        val halfClz = input(RSQRT_HALFCLZ)  // 0..15
+        val zero    = input(RSQRT_ZERO)
+
+        // De-normalize: result = y0 * 2^(halfClz - 6)
+        //   halfClz >= 6: shift left by (halfClz - 6), max shift = 9
+        //   halfClz < 6:  shift right by (6 - halfClz), max shift = 6
+        val shiftLeft = (halfClz >= U(6))
+        val shiftAmt = Mux(shiftLeft,
+          (halfClz - U(6, 4 bits)),
+          (U(6, 4 bits) - halfClz)
+        )
+        val resultRaw = Mux(shiftLeft,
+          y0.resize(32) |<< shiftAmt,
+          y0.resize(32) |>> shiftAmt
+        )
+
+        // Zero/negative input: return 0x7FFFFFFF
+        output(REGFILE_WRITE_DATA) := Mux(zero,
+          B(0x7FFFFFFF, 32 bits),
+          resultRaw.asBits
+        )
+      }
+
+      // --- FXDIV memory stage: apply sign, handle zero/overflow ---
+      when(input(IS_FXDIV)) {
+        val quotient = input(DIV_QUOTIENT)
+        val sign     = input(DIV_SIGN)
+        val zero     = input(DIV_ZERO)
+        val overflow = input(DIV_OVERFLOW)
+
+        // Apply sign and handle special cases
+        val signedResult = SInt(32 bits)
+        when(zero) {
+          // Division by zero: return max positive or min negative based on dividend sign
+          signedResult := Mux(sign, S(0x80000001, 32 bits), S(0x7FFFFFFF, 32 bits))
+        } elsewhen(overflow) {
+          // Overflow: saturate
+          signedResult := Mux(sign, S(0x80000001, 32 bits), S(0x7FFFFFFF, 32 bits))
+        } otherwise {
+          signedResult := Mux(sign, -quotient.asSInt, quotient.asSInt)
+        }
 
         output(REGFILE_WRITE_DATA) := signedResult.asBits
       }

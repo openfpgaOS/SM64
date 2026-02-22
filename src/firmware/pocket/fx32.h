@@ -102,11 +102,75 @@ static inline fx32 fx32_rcp(fx32 x) {
 }
 
 // ============================================
-// Software operations (no custom instruction)
+// Hardware clamp
 // ============================================
 
+// FXCLAMP rd, rs1, rs2 (funct3=4, funct7=0, opcode=0x0B)
+// rd = max(0, min(rs1, rs2))  (signed clamp to [0, rs2])
+static inline fx32 fx32_clamp(fx32 val, fx32 max_val) {
+    fx32 result;
+    __asm__ volatile (
+        ".insn r 0x0B, 4, 0, %0, %1, %2"
+        : "=r"(result)
+        : "r"(val), "r"(max_val)
+    );
+    return result;
+}
+
+// ============================================
+// Hardware inverse square root
+// ============================================
+
+// FXRSQRT rd, rs1 (funct3=5, funct7=0, opcode=0x0B, rs2=x0)
+// rd = 1/sqrt(rs1)  (Q16.16 inverse square root via 512-entry LUT)
+// Zero/negative input returns 0x7FFFFFFF.
+static inline fx32 fx32_rsqrt(fx32 x) {
+    fx32 result;
+    __asm__ volatile (
+        ".insn r 0x0B, 5, 0, %0, %1, x0"
+        : "=r"(result)
+        : "r"(x)
+    );
+    return result;
+}
+
+// ============================================
+// Hardware division
+// ============================================
+
+// FXDIV rd, rs1, rs2 (funct3=6, funct7=0, opcode=0x0B)
+// rd = ((int64_t)rs1 << 16) / rs2   (exact Q16.16 division, 34-cycle latency)
+// Division by zero returns 0x7FFFFFFF/0x80000001. Overflow saturates.
 static inline fx32 fx32_div(fx32 a, fx32 b) {
+    fx32 result;
+    __asm__ volatile (
+        ".insn r 0x0B, 6, 0, %0, %1, %2"
+        : "=r"(result)
+        : "r"(a), "r"(b)
+    );
+    return result;
+}
+
+// Software fallback (for reference/testing)
+static inline fx32 fx32_div_sw(fx32 a, fx32 b) {
     return (fx32)(((int64_t)a << 16) / b);
+}
+
+// ============================================
+// Fast division via hardware rcp + Newton-Raphson
+// ============================================
+
+// Refined reciprocal: FXRCP (~16 bits) + one NR step → ~32 bits precision.
+// Cost: ~9 cycles (1 rcp + 3 mul + 1 sub) vs ~50+ for software 64-bit div.
+static inline fx32 fx32_rcp_nr(fx32 b) {
+    fx32 y0 = fx32_rcp(b);                         // ~16 bits, 3 cycles
+    fx32 by0 = fx32_mul(b, y0);                     // b*y0 ≈ 1.0
+    return fx32_mul(y0, FX32_FROM_INT(2) - by0);    // y0*(2 - b*y0)
+}
+
+// Fast a/b: refined rcp + multiply. Full Q16.16 precision, ~12 cycles.
+static inline fx32 fx32_div_fast(fx32 a, fx32 b) {
+    return fx32_mul(a, fx32_rcp_nr(b));
 }
 
 #endif // FX32_H

@@ -523,7 +523,7 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
 #ifdef TARGET_POCKET
 static inline rv_t rv_div_sat(rv_t a, rv_t b) {
     if (b == 0) return (a >= 0) ? 0x7FFFFFFF : (int32_t)0x80000001;
-    return fx32_div(a, b);
+    return fx32_mul(a, fx32_rcp(b));
 }
 #else
 #define rv_div_sat(a, b) RV_DIV(a, b)
