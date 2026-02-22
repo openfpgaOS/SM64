@@ -1,6 +1,7 @@
 //
 // Video Scanout with 8-bit Indexed Color and Hardware Palette
-// Reads 8-bit palette indices from SDRAM, looks up RGB565 in palette RAM
+// Reads 8-bit palette indices from BRAM framebuffer (160x120),
+// performs 2x pixel/line replication to 320x240, looks up RGB888 in palette RAM.
 //
 
 `default_nettype none
@@ -10,33 +11,25 @@ module video_scanout_indexed (
     input wire clk_video,
     input wire reset_n,
 
-    // Video timing inputs (active high)
+    // Video timing inputs
     input wire [9:0] x_count,
     input wire [9:0] y_count,
-    input wire line_start,          // Pulses at start of each line (x_count == 0)
 
     // Pixel output (RGB888)
     output reg [23:0] pixel_color,
 
-    // Framebuffer base address (25-bit SDRAM byte address >> 1 = 16-bit word address)
-    input wire [24:0] fb_base_addr,
+    // BRAM framebuffer read port (directly accessible, dual-port BRAM in cpu_system)
+    output wire [12:0] fb_rd_addr,    // Word address into fb_bram (13-bit: 1 buf + 12 addr)
+    input wire  [31:0] fb_rd_data,    // 4 pixels per 32-bit word
 
-    // SDRAM clock domain (66 MHz)
-    input wire clk_sdram,
+    // Display buffer select
+    input wire fb_display_buf_sel,    // Which half of BRAM to read
 
-    // SDRAM burst interface
-    output reg         burst_rd,
-    output reg  [24:0] burst_addr,
-    output reg  [10:0] burst_len,
-    output wire        burst_32bit,
-    input wire  [31:0] burst_data,
-    input wire         burst_data_valid,
-    input wire         burst_data_done,
-
-    // Palette write interface (directly from CPU, active on any clock edge)
+    // Palette write interface (from CPU clock domain)
     input wire        pal_wr,
     input wire [7:0]  pal_addr,
-    input wire [23:0] pal_data      // RGB888 from Quake palette
+    input wire [23:0] pal_data,       // RGB888
+    input wire        clk_pal_wr      // Clock for palette writes (CPU clock)
 );
 
     // Video timing parameters
@@ -45,170 +38,85 @@ module video_scanout_indexed (
     localparam VID_H_BPORCH = 40;
     localparam VID_H_ACTIVE = 320;
 
-    // Line buffer: 320 x 8-bit palette indices
-    // Store as 16-bit words for efficient SDRAM reads
-    reg [15:0] line_buffer [0:159];  // 160 x 16-bit = 320 x 8-bit indices
-    reg [7:0] write_ptr;    // Write pointer (0-159 for 16-bit words)
+    localparam FB_WIDTH = 160;
 
     // Palette RAM: 256 entries x 24-bit RGB
-    // Using inferred dual-port RAM
     reg [23:0] palette [0:255];
 
-    // Use 32-bit burst mode (4 pixels per 32-bit word)
-    assign burst_32bit = 1'b1;
-
-    // =========================================
-    // Palette write (directly driven, no clock)
-    // =========================================
-    always @(posedge clk_sdram) begin
+    // Palette write (CPU clock domain)
+    always @(posedge clk_pal_wr) begin
         if (pal_wr) begin
             palette[pal_addr] <= pal_data;
         end
     end
 
     // =========================================
-    // Video clock domain - Line start detection
+    // Pixel address calculation with 2x upscale
+    // =========================================
+    //
+    // Pipeline: addr (comb) -> BRAM read (1 clk) -> byte select + palette (comb) -> output (1 clk)
+    // Total latency: 2 cycles. Pre-fetch address 2 pixels ahead to compensate.
+
+    // Pre-fetch x by 2 pixels for pipeline compensation
+    wire [9:0] pipe_x = x_count + 10'd2;
+
+    // Source pixel coordinates (divide output by 2 for 2x upscale)
+    wire [9:0] visible_x = pipe_x - VID_H_BPORCH;
+    wire [9:0] visible_y = y_count - VID_V_BPORCH;
+    wire [7:0] src_x = visible_x[8:1];    // 0..159
+    wire [6:0] src_y = visible_y[7:1];    // 0..119
+
+    // Pixel address = src_y * 160 + src_x
+    // Decompose multiply: y*160 = y*128 + y*32 = (y<<7) + (y<<5)
+    wire [14:0] pixel_addr = ({1'b0, src_y, 7'b0}) + ({3'b0, src_y, 5'b0}) + {7'b0, src_x};
+
+    // 32-bit word address and byte select within word
+    wire [12:0] word_addr = pixel_addr[14:2];
+    wire [1:0]  byte_sel  = pixel_addr[1:0];
+
+    // Add buffer base offset
+    assign fb_rd_addr = {fb_display_buf_sel, word_addr[11:0]};
+
+    // =========================================
+    // Pixel read pipeline (2-stage: BRAM read -> output)
     // =========================================
 
-    // Detect which line we need to fetch (next visible line)
-    wire [9:0] fetch_line = y_count - VID_V_BPORCH + 1;  // Fetch line ahead
-    wire in_vactive = (y_count >= VID_V_BPORCH - 1) && (y_count < VID_V_BPORCH + VID_V_ACTIVE - 1);
-
-    // Generate fetch request at end of line (before next visible line)
-    reg fetch_request;
-    reg fetch_request_ack_sync1, fetch_request_ack_sync2;
-    reg [8:0] fetch_line_latched;
-
-    always @(posedge clk_video or negedge reset_n) begin
-        if (!reset_n) begin
-            fetch_request <= 0;
-            fetch_line_latched <= 0;
-            fetch_request_ack_sync1 <= 0;
-            fetch_request_ack_sync2 <= 0;
-        end else begin
-            // Sync ack from SDRAM domain
-            fetch_request_ack_sync1 <= fetch_request_ack;
-            fetch_request_ack_sync2 <= fetch_request_ack_sync1;
-
-            // Clear request when ack received
-            if (fetch_request_ack_sync2)
-                fetch_request <= 0;
-
-            // Issue fetch request at line start if in active region
-            if (line_start && in_vactive && !fetch_request) begin
-                fetch_request <= 1;
-                fetch_line_latched <= fetch_line[8:0];
-            end
-        end
+    // Stage 1: Register byte_sel to sync with BRAM read data (1 cycle latency)
+    reg [1:0] byte_sel_d1;
+    always @(posedge clk_video) begin
+        byte_sel_d1 <= byte_sel;
     end
 
-    // =========================================
-    // Video clock domain - Pixel output
-    // =========================================
-
-    wire [9:0] visible_x = x_count - VID_H_BPORCH;
-    wire in_hactive = (x_count >= VID_H_BPORCH) && (x_count < VID_H_BPORCH + VID_H_ACTIVE);
-    wire in_vactive_display = (y_count >= VID_V_BPORCH) && (y_count < VID_V_BPORCH + VID_V_ACTIVE);
-
-    // Read 8-bit index from line buffer
-    // visible_x[8:1] selects 16-bit word, visible_x[0] selects which byte
-    wire [7:0] word_idx = visible_x[8:1];
-    wire [15:0] pixel_word = line_buffer[word_idx];
-    wire [7:0] palette_index = visible_x[0] ? pixel_word[15:8] : pixel_word[7:0];
-
-    // Lookup palette (registered for timing)
-    reg [23:0] palette_rgb;
-    always @(posedge clk_video) begin
-        palette_rgb <= palette[palette_index];
+    // Byte select from BRAM word (combinational, using delayed byte_sel)
+    reg [7:0] palette_index;
+    always @(*) begin
+        case (byte_sel_d1)
+            2'b00: palette_index = fb_rd_data[7:0];
+            2'b01: palette_index = fb_rd_data[15:8];
+            2'b10: palette_index = fb_rd_data[23:16];
+            2'b11: palette_index = fb_rd_data[31:24];
+        endcase
     end
 
+    // Combinational palette lookup (12.288 MHz has ~81ns period, plenty of margin)
+    wire [23:0] palette_rgb = palette[palette_index];
+
+    // Active region detection (using pre-fetched x for pipeline alignment)
+    wire in_hactive = (pipe_x >= VID_H_BPORCH) && (pipe_x < VID_H_BPORCH + VID_H_ACTIVE);
+    wire in_vactive = (y_count >= VID_V_BPORCH) && (y_count < VID_V_BPORCH + VID_V_ACTIVE);
+
+    // Delay active signal by 1 cycle to match BRAM read latency
+    reg in_active_d1;
     always @(posedge clk_video) begin
-        if (in_hactive && in_vactive_display) begin
+        in_active_d1 <= in_hactive && in_vactive;
+    end
+
+    // Stage 2: Output pixel (registered)
+    always @(posedge clk_video) begin
+        if (in_active_d1)
             pixel_color <= palette_rgb;
-        end else begin
+        else
             pixel_color <= 24'h000000;
-        end
-    end
-
-    // =========================================
-    // SDRAM clock domain - Burst read FSM
-    // =========================================
-
-    // Sync fetch request to SDRAM domain
-    reg fetch_request_sync1, fetch_request_sync2;
-    reg fetch_request_ack;
-    reg [8:0] fetch_line_sdram;
-
-    // FSM states
-    localparam ST_IDLE = 2'd0;
-    localparam ST_BURST = 2'd1;
-    localparam ST_WAIT = 2'd2;
-
-    reg [1:0] state;
-
-    always @(posedge clk_sdram or negedge reset_n) begin
-        if (!reset_n) begin
-            state <= ST_IDLE;
-            burst_rd <= 0;
-            burst_addr <= 0;
-            burst_len <= 0;
-            write_ptr <= 0;
-            fetch_request_sync1 <= 0;
-            fetch_request_sync2 <= 0;
-            fetch_request_ack <= 0;
-            fetch_line_sdram <= 0;
-        end else begin
-            // Sync fetch request
-            fetch_request_sync1 <= fetch_request;
-            fetch_request_sync2 <= fetch_request_sync1;
-
-            // Default: deassert burst_rd
-            burst_rd <= 0;
-
-            case (state)
-                ST_IDLE: begin
-                    fetch_request_ack <= 0;
-
-                    // Rising edge of fetch request
-                    if (fetch_request_sync2 && !fetch_request_ack) begin
-                        // Calculate SDRAM address for this line
-                        // Each line is 320 bytes = 160 x 16-bit words
-                        // For 8-bit indexed: line_addr = base + line * 320 / 2 = base + line * 160
-                        fetch_line_sdram <= fetch_line_latched;
-                        // burst_addr = base + line * 160 = base + line * 128 + line * 32
-                        burst_addr <= fb_base_addr + {fetch_line_latched, 7'b0} + {2'b0, fetch_line_latched, 5'b0};
-                        burst_len <= 11'd80;   // 80 READ cmds x BL=2 = 160 x 16-bit words = 320 pixels
-                        burst_rd <= 1;
-                        write_ptr <= 0;
-                        state <= ST_BURST;
-                    end
-                end
-
-                ST_BURST: begin
-                    // Write incoming data to line buffer
-                    if (burst_data_valid) begin
-                        // Each 32-bit word contains 4 palette indices (4 x 8-bit)
-                        // Store as two 16-bit entries in line buffer
-                        line_buffer[write_ptr] <= burst_data[15:0];      // First 2 pixels
-                        line_buffer[write_ptr + 1] <= burst_data[31:16]; // Next 2 pixels
-                        write_ptr <= write_ptr + 2;
-                    end
-
-                    if (burst_data_done) begin
-                        fetch_request_ack <= 1;
-                        state <= ST_WAIT;
-                    end
-                end
-
-                ST_WAIT: begin
-                    // Wait for fetch_request to clear before accepting new request
-                    if (!fetch_request_sync2) begin
-                        fetch_request_ack <= 0;
-                        state <= ST_IDLE;
-                    end
-                end
-            endcase
-        end
     end
 
 endmodule

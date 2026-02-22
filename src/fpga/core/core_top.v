@@ -1057,6 +1057,7 @@ assign video_hs = vidout_hs;
     cpu_system cpu (
         .clk(clk_cpu),  // 95 MHz
         .clk_74a(clk_74a),
+        .clk_video(clk_core_12288),  // 12.288 MHz for BRAM FB read port
         .reset_n(reset_n),
         .dataslot_allcomplete(dataslot_allcomplete),
         .vsync(vidout_vs),
@@ -1105,6 +1106,10 @@ assign video_hs = vidout_hs;
         // Display control
         .display_mode(display_mode),
         .fb_display_addr(fb_display_addr),
+        // BRAM framebuffer read port (directly to video scanout)
+        .fb_bram_rd_addr(fb_rd_addr),
+        .fb_bram_rd_data(fb_rd_data),
+        .fb_display_buf_sel_out(fb_display_buf_sel),
         // Palette write interface
         .pal_wr(cpu_pal_wr),
         .pal_addr(cpu_pal_addr),
@@ -1153,13 +1158,7 @@ assign video_hs = vidout_hs;
         .mem_ready(term_mem_ready)
     );
 
-    // Line start signal for video scanout (pulses when x_count == 0)
-    reg line_start;
-    always @(posedge clk_core_12288) begin
-        line_start <= (x_count == 0);
-    end
-
-    // Video scanout from SDRAM framebuffer (8-bit indexed with hardware palette)
+    // Video scanout from BRAM framebuffer (8-bit indexed with hardware palette + 2x upscale)
     wire [23:0] framebuffer_pixel_color;
 
     // Palette write signals from CPU
@@ -1167,14 +1166,10 @@ assign video_hs = vidout_hs;
     wire [7:0]  cpu_pal_addr;
     wire [23:0] cpu_pal_data;
 
-    // SDRAM burst interface signals for video scanout
-    wire        video_burst_rd;
-    wire [24:0] video_burst_addr;
-    wire [10:0] video_burst_len;
-    wire        video_burst_32bit;
-    wire [31:0] video_burst_data;
-    wire        video_burst_data_valid;
-    wire        video_burst_data_done;
+    // BRAM framebuffer read port signals (between cpu_system and video_scanout)
+    wire [12:0] fb_rd_addr;
+    wire [31:0] fb_rd_data;
+    wire        fb_display_buf_sel;
 
     video_scanout_indexed scanout (
         // Video clock domain (12.288 MHz)
@@ -1182,23 +1177,16 @@ assign video_hs = vidout_hs;
         .reset_n(reset_n),
         .x_count(x_count),
         .y_count(y_count),
-        .line_start(line_start),
         .pixel_color(framebuffer_pixel_color),
-        .fb_base_addr(fb_display_addr),  // 25-bit SDRAM 16-bit word address
-        // SDRAM clock domain (110 MHz)
-        .clk_sdram(clk_ram_controller),
-        // SDRAM burst read interface
-        .burst_rd(video_burst_rd),
-        .burst_addr(video_burst_addr),
-        .burst_len(video_burst_len),
-        .burst_32bit(video_burst_32bit),
-        .burst_data(video_burst_data),
-        .burst_data_valid(video_burst_data_valid),
-        .burst_data_done(video_burst_data_done),
-        // Palette write interface (from CPU, same clock as SDRAM)
+        // BRAM framebuffer read port
+        .fb_rd_addr(fb_rd_addr),
+        .fb_rd_data(fb_rd_data),
+        .fb_display_buf_sel(fb_display_buf_sel),
+        // Palette write interface (from CPU clock domain)
         .pal_wr(cpu_pal_wr),
         .pal_addr(cpu_pal_addr),
-        .pal_data(cpu_pal_data)
+        .pal_data(cpu_pal_data),
+        .clk_pal_wr(clk_ram_controller)
     );
 
 always @(posedge clk_core_12288 or negedge reset_n) begin
@@ -1385,14 +1373,14 @@ io_sdram isr0 (
     .phy_dq         ( dram_dq ),
     .phy_dqm        ( dram_dqm ),
 
-    // Burst interface - used for video scanout
-    .burst_rd           ( video_burst_rd ),
-    .burst_addr         ( video_burst_addr ),
-    .burst_len          ( video_burst_len ),
-    .burst_32bit        ( video_burst_32bit ),
-    .burst_data         ( video_burst_data ),
-    .burst_data_valid   ( video_burst_data_valid ),
-    .burst_data_done    ( video_burst_data_done ),
+    // Burst interface - no longer used (video reads from BRAM framebuffer)
+    .burst_rd           ( 1'b0 ),
+    .burst_addr         ( 25'b0 ),
+    .burst_len          ( 11'b0 ),
+    .burst_32bit        ( 1'b0 ),
+    .burst_data         ( ),
+    .burst_data_valid   ( ),
+    .burst_data_done    ( ),
 
     // Burst write interface - not used
     .burstwr        ( 1'b0 ),

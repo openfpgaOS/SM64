@@ -3,8 +3,9 @@
  *
  * Implements GfxWindowManagerAPI for the Pocket hardware.
  * The software rasterizer outputs RGBA32 to gfx_output.
- * We convert RGBA32 -> RGB332 (8-bit) and write to the SDRAM framebuffer,
- * then use the hardware palette for display.
+ * We convert RGBA32 -> RGB332 (8-bit) and write to a BRAM framebuffer (160x120).
+ * The FPGA video scanout reads BRAM with 2x pixel/line replication to 320x240,
+ * then uses the hardware palette for RGB888 display.
  */
 
 #ifdef TARGET_POCKET
@@ -29,13 +30,11 @@
 #define SYS_PAL_INDEX       (*(volatile uint32_t *)0x40000040)
 #define SYS_PAL_DATA        (*(volatile uint32_t *)0x40000044)
 
-/* SDRAM uncached alias (bypasses D-cache for framebuffer writes) */
-#define SDRAM_UC_BASE       0x50000000u
+/* BRAM framebuffer at 0x08000000 (mapped in FPGA, dual-port, no cache needed) */
+#define FB_BRAM_BASE  ((volatile uint32_t *)0x08000000)
 
 #define SCREEN_WIDTH  160
 #define SCREEN_HEIGHT 120
-#define DISPLAY_WIDTH  320
-#define DISPLAY_HEIGHT 240
 
 /* Cycle counter for timing */
 static inline uint64_t get_cycles(void) {
@@ -46,12 +45,6 @@ static inline uint64_t get_cycles(void) {
 
 /* CPU clock speed (110 MHz) */
 #define CPU_HZ 110000000ULL
-
-/* Get CPU byte address of the current draw framebuffer */
-static uint8_t *fb_draw_buffer(void) {
-    uint32_t draw_word_addr = SYS_FB_DRAW & 0x01FFFFFFu;
-    return (uint8_t *)(SDRAM_UC_BASE + (draw_word_addr << 1));
-}
 
 /* Set up RGB332 palette in the hardware palette LUT.
  * Maps all 256 possible RGB332 values to their RGB888 equivalents. */
@@ -72,26 +65,21 @@ static void setup_rgb332_palette(void) {
     }
 }
 
-/* Convert RGBA32 framebuffer to RGB332 indexed framebuffer with 2x upscale.
- * gfx_output is 160x120 RGBA32, we write 320x240 8-bit to SDRAM. */
+/* Convert RGBA32 framebuffer to RGB332 and write to BRAM (160x120, no upscale).
+ * Hardware does 2x pixel/line replication in the FPGA video scanout.
+ * Writes 4 pixels at a time as 32-bit words for efficiency (4,800 word writes). */
 static void convert_rgba32_to_rgb332(void) {
-    uint8_t *dst = fb_draw_buffer();
+    volatile uint32_t *dst = FB_BRAM_BASE;
     const uint32_t *src = gfx_output;
+    int total = SCREEN_WIDTH * SCREEN_HEIGHT;
 
-    for (int sy = 0; sy < SCREEN_HEIGHT; sy++) {
-        uint8_t *row0 = dst + (sy * 2) * DISPLAY_WIDTH;
-        uint8_t *row1 = row0 + DISPLAY_WIDTH;
-        for (int sx = 0; sx < SCREEN_WIDTH; sx++) {
-            uint32_t rgba = src[sy * SCREEN_WIDTH + sx];
-            uint8_t r = rgba & 0xFF;
-            uint8_t g = (rgba >> 8) & 0xFF;
-            uint8_t b = (rgba >> 16) & 0xFF;
-            uint8_t c = (r & 0xE0) | ((g >> 3) & 0x1C) | (b >> 6);
-            row0[sx * 2]     = c;
-            row0[sx * 2 + 1] = c;
-            row1[sx * 2]     = c;
-            row1[sx * 2 + 1] = c;
-        }
+    for (int i = 0; i < total; i += 4) {
+        uint32_t r0 = src[i+0], r1 = src[i+1], r2 = src[i+2], r3 = src[i+3];
+        uint8_t c0 = (r0 & 0xE0) | ((r0 >> 11) & 0x1C) | ((r0 >> 22) & 0x03);
+        uint8_t c1 = (r1 & 0xE0) | ((r1 >> 11) & 0x1C) | ((r1 >> 22) & 0x03);
+        uint8_t c2 = (r2 & 0xE0) | ((r2 >> 11) & 0x1C) | ((r2 >> 22) & 0x03);
+        uint8_t c3 = (r3 & 0xE0) | ((r3 >> 11) & 0x1C) | ((r3 >> 22) & 0x03);
+        dst[i >> 2] = c0 | ((uint32_t)c1 << 8) | ((uint32_t)c2 << 16) | ((uint32_t)c3 << 24);
     }
 }
 
@@ -134,26 +122,26 @@ static bool gfx_pocket_start_frame(void) {
     return true;
 }
 
-/* Debug overlay: draw text into RGB332 framebuffer */
+/* Debug overlay: draw text into 160x120 BRAM framebuffer */
 extern char dbg_overlay_line[80];
 
-static void dbg_draw_char(uint8_t *fb, int px, int py, char c) {
+static void dbg_draw_char(volatile uint8_t *fb, int px, int py, char c) {
     if (c < 32 || c > 127) return;
     const uint8_t *glyph = font8x8[c - 32];
     for (int row = 0; row < 8; row++) {
         int y = py + row;
-        if ((unsigned)y >= DISPLAY_HEIGHT) continue;
-        uint8_t *dst = fb + y * DISPLAY_WIDTH + px;
+        if ((unsigned)y >= SCREEN_HEIGHT) continue;
+        volatile uint8_t *dst = fb + y * SCREEN_WIDTH + px;
         uint8_t bits = glyph[row];
         for (int col = 0; col < 8; col++) {
             int x = px + col;
-            if ((unsigned)x >= DISPLAY_WIDTH) continue;
+            if ((unsigned)x >= SCREEN_WIDTH) continue;
             dst[col] = (bits & (0x80 >> col)) ? 0xFF : 0x00;
         }
     }
 }
 
-static void dbg_draw_overlay(uint8_t *fb) {
+static void dbg_draw_overlay(volatile uint8_t *fb) {
     int x = 1, y = 1;
     for (const char *s = dbg_overlay_line; *s; s++) {
         if (*s == '\n') { x = 1; y += 9; continue; }
@@ -163,14 +151,14 @@ static void dbg_draw_overlay(uint8_t *fb) {
 }
 
 static void gfx_pocket_swap_buffers_begin(void) {
-    /* Convert the software rasterizer output to the hardware framebuffer */
+    /* Convert the software rasterizer output to the BRAM framebuffer */
     if (gfx_output != NULL) {
         convert_rgba32_to_rgb332();
     }
 
     /* Draw debug overlay on top of converted framebuffer */
     if (dbg_overlay_line[0]) {
-        dbg_draw_overlay(fb_draw_buffer());
+        dbg_draw_overlay((volatile uint8_t *)FB_BRAM_BASE);
     }
 
     /* Request buffer flip (happens on next vblank) */

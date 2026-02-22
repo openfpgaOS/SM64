@@ -14,6 +14,7 @@
 module cpu_system (
     input wire clk,           // CPU clock (currently 66 MHz, same as SDRAM controller)
     input wire clk_74a,       // Bridge clock (74.25 MHz) - for APF interface
+    input wire clk_video,     // Video clock (12.288 MHz) - for BRAM framebuffer read port
     input wire reset_n,
     input wire dataslot_allcomplete,  // All data slots loaded by APF
     input wire vsync,         // Vertical sync for buffer swap timing
@@ -67,7 +68,12 @@ module cpu_system (
 
     // Display control outputs
     output wire        display_mode,       // 0=terminal overlay, 1=framebuffer only
-    output wire [24:0] fb_display_addr,    // SDRAM word address for video scanout
+    output wire [24:0] fb_display_addr,    // SDRAM word address for video scanout (legacy)
+
+    // BRAM framebuffer read port (directly to video scanout, clk_video domain)
+    input wire  [12:0] fb_bram_rd_addr,
+    output wire [31:0] fb_bram_rd_data,
+    output wire        fb_display_buf_sel_out,
 
     // Palette write interface (directly to video_scanout_indexed)
     output reg         pal_wr,
@@ -197,6 +203,7 @@ wire        live_mem_write = live_dbus_grant & dbus_we;
 
 // Memory map:
 // 0x00000000 - 0x0000FFFF : RAM (64KB)
+// 0x08000000 - 0x0800FFFF : BRAM Framebuffer (2x 160x120 RGB332 double-buffered)
 // 0x10000000 - 0x13FFFFFF : SDRAM (64MB) - includes framebuffers
 //   Framebuffer 0: 0x10000000 - 0x10025800 (153,600 bytes)
 //   Framebuffer 1: 0x10100000 - 0x10125800 (153,600 bytes)
@@ -215,6 +222,7 @@ wire [31:0] ibus_byte_addr = {ibus_adr, 2'b00};
 
 // D-bus pre-decode
 wire dbus_ram_select       = (dbus_byte_addr[31:16] == 16'b0);
+wire dbus_fbbram_select    = (dbus_byte_addr[31:16] == 16'h0800);  // 0x08000000-0x0800FFFF (BRAM FB)
 wire dbus_sdram_select     = (dbus_byte_addr[31:26] == 6'b000100);
 wire dbus_sdram_uc_select  = (dbus_byte_addr[31:26] == 6'b010100);
 wire dbus_term_select      = (dbus_byte_addr[31:13] == 19'h10000);
@@ -226,6 +234,7 @@ wire dbus_audio_select     = (dbus_byte_addr[31:24] == 8'h4C);
 
 // I-bus pre-decode
 wire ibus_ram_select       = (ibus_byte_addr[31:16] == 16'b0);
+wire ibus_fbbram_select    = (ibus_byte_addr[31:16] == 16'h0800);  // 0x08000000-0x0800FFFF (BRAM FB)
 wire ibus_sdram_select     = (ibus_byte_addr[31:26] == 6'b000100);
 wire ibus_sdram_uc_select  = (ibus_byte_addr[31:26] == 6'b010100);
 wire ibus_term_select      = (ibus_byte_addr[31:13] == 19'h10000);
@@ -237,6 +246,7 @@ wire ibus_audio_select     = (ibus_byte_addr[31:24] == 8'h4C);
 
 // Mux decoded results based on grant (1-bit mux vs 32-bit address mux + decode)
 wire live_ram_select       = live_dbus_grant ? dbus_ram_select       : ibus_ram_select;       // 0x00000000-0x0000FFFF (64KB)
+wire live_fbbram_select    = live_dbus_grant ? dbus_fbbram_select    : ibus_fbbram_select;    // 0x08000000-0x0800FFFF (BRAM FB)
 wire live_sdram_select     = live_dbus_grant ? dbus_sdram_select     : ibus_sdram_select;     // 0x10000000-0x13FFFFFF (64MB)
 wire live_sdram_uc_select  = live_dbus_grant ? dbus_sdram_uc_select  : ibus_sdram_uc_select;  // 0x50000000-0x53FFFFFF (64MB uncached alias)
 wire live_term_select      = live_dbus_grant ? dbus_term_select      : ibus_term_select;      // 0x20000000-0x20001FFF
@@ -293,6 +303,76 @@ altsyncram #(
 );
 
 // ============================================
+// BRAM Framebuffer: 2 x 160x120 = 38,400 bytes = 9,600 x 32-bit words
+// Port A: CPU read/write with byte enables (clk domain)
+// Port B: Video scanout read-only (clk_video domain)
+// Uses explicit altsyncram to guarantee M10K inference with byte enables.
+// ============================================
+// Double-buffer select: 0 or 1
+reg fb_draw_buf_sel;
+reg fb_display_buf_sel;
+assign fb_display_buf_sel_out = fb_display_buf_sel;
+
+// CPU write port address: {buf_sel, word_addr_within_buffer[11:0]}
+// Each buffer = 19,200 bytes = 4,800 words (needs 13 bits: 1 buf + 12 addr)
+wire [12:0] fb_bram_wr_addr = {fb_draw_buf_sel, live_mem_addr[13:2]};
+wire        fb_bram_wren = accept_access && live_fbbram_select && |live_mem_wstrb;
+wire [3:0]  fb_bram_byteena = live_mem_wstrb;
+
+// BRAM read data for CPU reads
+wire [31:0] fb_bram_cpu_rdata;
+reg fbbram_pending;
+
+// Port A address mux: use pending address during completion cycle
+wire [12:0] fb_bram_addr_a = mem_pending ? {fb_draw_buf_sel, req_addr[13:2]} : fb_bram_wr_addr;
+
+altsyncram #(
+    .operation_mode("BIDIR_DUAL_PORT"),
+    .width_a(32),
+    .widthad_a(14),              // 14 bits = 16384 max words (we use 9600)
+    .numwords_a(16384),
+    .width_byteena_a(4),        // 4 byte enables for 32-bit word
+    .width_b(32),
+    .widthad_b(14),
+    .numwords_b(16384),
+    .width_byteena_b(1),
+    .lpm_type("altsyncram"),
+    .outdata_reg_a("UNREGISTERED"),
+    .outdata_reg_b("UNREGISTERED"),
+    .intended_device_family("Cyclone V"),
+    .read_during_write_mode_port_a("NEW_DATA_NO_NBE_READ"),
+    .read_during_write_mode_mixed_ports("DONT_CARE"),
+    .power_up_uninitialized("TRUE")
+) fb_bram (
+    .clock0(clk),                       // Port A clock (CPU)
+    .address_a({1'b0, fb_bram_addr_a}),
+    .data_a(mem_pending ? req_wdata : live_mem_wdata),
+    .wren_a(fb_bram_wren),
+    .byteena_a(fb_bram_byteena),
+    .q_a(fb_bram_cpu_rdata),
+
+    .clock1(clk_video),                 // Port B clock (video 12.288 MHz)
+    .address_b({1'b0, fb_bram_rd_addr}),
+    .data_b({32{1'b0}}),
+    .wren_b(1'b0),
+    .byteena_b(1'b1),
+    .q_b(fb_bram_rd_data),
+
+    // Unused
+    .aclr0(1'b0),
+    .aclr1(1'b0),
+    .addressstall_a(1'b0),
+    .addressstall_b(1'b0),
+    .clocken0(1'b1),
+    .clocken1(1'b1),
+    .clocken2(1'b1),
+    .clocken3(1'b1),
+    .eccstatus(),
+    .rden_a(1'b1),
+    .rden_b(1'b1)
+);
+
+// ============================================
 // Forward terminal requests to terminal module
 assign term_mem_valid = mem_pending ? term_pending : (live_mem_valid && live_term_select);
 assign term_mem_addr = mem_pending ? req_addr : live_mem_addr;
@@ -343,14 +423,11 @@ reg [31:0] ds_resp_addr_reg;
 // Palette write index register
 reg [7:0] pal_index_reg;
 
-// Double buffer addresses (22-bit PSRAM 16-bit word addresses)
-// Buffer 0: PSRAM byte 0x000000 = word addr 0x000000 (base of PSRAM)
-// Buffer 1: PSRAM byte 0x100000 = word addr 0x080000 (1MB into PSRAM)
-// CPU writes to 0x30000000 (PSRAM), video reads from PSRAM via CRAM1
-localparam FB_ADDR_0 = 25'h0000000;  // Framebuffer 0 at PSRAM base
-localparam FB_ADDR_1 = 25'h0080000;  // Framebuffer 1 at 1MB offset
-reg [24:0] fb_display_addr_reg;      // Currently displayed buffer
-reg [24:0] fb_draw_addr_reg;         // Buffer being drawn to
+// Double buffer addresses (legacy, kept for sysreg read compatibility)
+localparam FB_ADDR_0 = 25'h0000000;
+localparam FB_ADDR_1 = 25'h0080000;
+reg [24:0] fb_display_addr_reg;
+reg [24:0] fb_draw_addr_reg;
 reg fb_swap_pending;                  // Swap requested, waiting for vsync
 
 assign display_mode = display_mode_reg;
@@ -450,6 +527,8 @@ always @(posedge clk) begin
         fb_display_addr_reg <= FB_ADDR_0;
         fb_draw_addr_reg <= FB_ADDR_1;
         fb_swap_pending <= 0;
+        fb_draw_buf_sel <= 1;      // Draw to buffer 1
+        fb_display_buf_sel <= 0;   // Display buffer 0
         pal_wr <= 0;
         pal_addr <= 0;
         pal_data <= 0;
@@ -484,9 +563,12 @@ always @(posedge clk) begin
 
         // Perform buffer swap on vsync if pending
         if (fb_swap_pending && vsync_rising) begin
-            // Swap display and draw addresses
+            // Swap display and draw addresses (legacy)
             fb_display_addr_reg <= fb_draw_addr_reg;
             fb_draw_addr_reg <= fb_display_addr_reg;
+            // Swap BRAM framebuffer bank select
+            fb_draw_buf_sel <= fb_display_buf_sel;
+            fb_display_buf_sel <= fb_draw_buf_sel;
             fb_swap_pending <= 0;
         end
 
@@ -630,6 +712,7 @@ wire [31:0] active_psram_rdata = psram_which ? psram1_rdata      : psram_rdata;
 reg sysreg_pending;
 reg audio_pending;
 reg link_pending;
+// fbbram_pending declared above with BRAM FB
 reg [31:0] pending_rdata;
 reg sdram_read_is_prefetch;
 reg sdram_prefetch_primary_done;
@@ -708,6 +791,7 @@ always @(posedge clk or posedge reset) begin
         sysreg_pending <= 0;
         audio_pending <= 0;
         link_pending <= 0;
+        fbbram_pending <= 0;
         link_reg_wr <= 0;
         link_reg_rd <= 0;
         link_reg_addr <= 0;
@@ -825,6 +909,9 @@ always @(posedge clk or posedge reset) begin
                         psram_cmd_issued <= 0;
                         psram_issue_wait <= 0;
                     end
+                end else if (live_fbbram_select) begin
+                    mem_pending <= 1;
+                    fbbram_pending <= 1;
                 end else if (live_term_select) begin
                     mem_pending <= 1;
                     term_pending <= 1;
@@ -1106,6 +1193,18 @@ always @(posedge clk or posedge reset) begin
                 end
                 mem_pending <= 0;
                 term_pending <= 0;
+                pending_bus <= BUS_NONE;
+            end else if (fbbram_pending) begin
+                // BRAM FB: 1-cycle latency for reads (write already done combinationally)
+                if (pending_bus == BUS_DBUS) begin
+                    dbus_ack <= 1;
+                    dbus_dat_miso <= fb_bram_cpu_rdata;
+                end else begin
+                    ibus_ack <= 1;
+                    ibus_dat_miso <= fb_bram_cpu_rdata;
+                end
+                mem_pending <= 0;
+                fbbram_pending <= 0;
                 pending_bus <= BUS_NONE;
             end else if (sysreg_pending) begin
                 if (pending_bus == BUS_DBUS) begin
