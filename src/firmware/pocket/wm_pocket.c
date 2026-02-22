@@ -32,8 +32,10 @@
 /* SDRAM uncached alias (bypasses D-cache for framebuffer writes) */
 #define SDRAM_UC_BASE       0x50000000u
 
-#define SCREEN_WIDTH  320
-#define SCREEN_HEIGHT 240
+#define SCREEN_WIDTH  160
+#define SCREEN_HEIGHT 120
+#define DISPLAY_WIDTH  320
+#define DISPLAY_HEIGHT 240
 
 /* Cycle counter for timing */
 static inline uint64_t get_cycles(void) {
@@ -70,21 +72,26 @@ static void setup_rgb332_palette(void) {
     }
 }
 
-/* Convert RGBA32 framebuffer to RGB332 indexed framebuffer.
- * gfx_output is 320x240 RGBA32, we write 320x240 8-bit to SDRAM. */
+/* Convert RGBA32 framebuffer to RGB332 indexed framebuffer with 2x upscale.
+ * gfx_output is 160x120 RGBA32, we write 320x240 8-bit to SDRAM. */
 static void convert_rgba32_to_rgb332(void) {
     uint8_t *dst = fb_draw_buffer();
     const uint32_t *src = gfx_output;
-    int count = SCREEN_WIDTH * SCREEN_HEIGHT;
 
-    for (int i = 0; i < count; i++) {
-        uint32_t rgba = src[i];
-        /* RGBA32: byte order is R, G, B, A (little-endian: A<<24 | B<<16 | G<<8 | R) */
-        uint8_t r = rgba & 0xFF;
-        uint8_t g = (rgba >> 8) & 0xFF;
-        uint8_t b = (rgba >> 16) & 0xFF;
-        /* RGB332: RRRGGGBB */
-        dst[i] = (r & 0xE0) | ((g >> 3) & 0x1C) | (b >> 6);
+    for (int sy = 0; sy < SCREEN_HEIGHT; sy++) {
+        uint8_t *row0 = dst + (sy * 2) * DISPLAY_WIDTH;
+        uint8_t *row1 = row0 + DISPLAY_WIDTH;
+        for (int sx = 0; sx < SCREEN_WIDTH; sx++) {
+            uint32_t rgba = src[sy * SCREEN_WIDTH + sx];
+            uint8_t r = rgba & 0xFF;
+            uint8_t g = (rgba >> 8) & 0xFF;
+            uint8_t b = (rgba >> 16) & 0xFF;
+            uint8_t c = (r & 0xE0) | ((g >> 3) & 0x1C) | (b >> 6);
+            row0[sx * 2]     = c;
+            row0[sx * 2 + 1] = c;
+            row1[sx * 2]     = c;
+            row1[sx * 2 + 1] = c;
+        }
     }
 }
 
@@ -135,12 +142,12 @@ static void dbg_draw_char(uint8_t *fb, int px, int py, char c) {
     const uint8_t *glyph = font8x8[c - 32];
     for (int row = 0; row < 8; row++) {
         int y = py + row;
-        if ((unsigned)y >= SCREEN_HEIGHT) continue;
-        uint8_t *dst = fb + y * SCREEN_WIDTH + px;
+        if ((unsigned)y >= DISPLAY_HEIGHT) continue;
+        uint8_t *dst = fb + y * DISPLAY_WIDTH + px;
         uint8_t bits = glyph[row];
         for (int col = 0; col < 8; col++) {
             int x = px + col;
-            if ((unsigned)x >= SCREEN_WIDTH) continue;
+            if ((unsigned)x >= DISPLAY_WIDTH) continue;
             dst[col] = (bits & (0x80 >> col)) ? 0xFF : 0x00;
         }
     }

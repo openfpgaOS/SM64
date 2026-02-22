@@ -258,8 +258,8 @@ void main_func(void) {
     atexit(save_config);
 #else
     /* Pocket: use hardcoded defaults, no config file */
-    configScreenWidth = 320;
-    configScreenHeight = 240;
+    configScreenWidth = 160;
+    configScreenHeight = 120;
     configEnableSound = true;
     configFullscreen = false;
 #endif
