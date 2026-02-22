@@ -264,22 +264,23 @@ assign link_sck_i = port_tran_sck;
 assign link_sd_i = port_tran_sd;
 
 // PSRAM Controller for CRAM0 (16MB)
-// Uses muxed signals for bridge/CPU arbitration
+// Source domain (cpu/bridge): clk_ram_controller
+// Destination domain (controller): clk_psram_controller
 psram_controller #(
-    .CLOCK_SPEED(100.0)
+    .CLOCK_SPEED(133.0)
 ) psram0 (
-    .clk(clk_ram_controller),
+    .clk(clk_psram_controller),
     .reset_n(reset_n),
 
-    // Muxed word interface (bridge or CPU)
-    .word_rd(psram_mux_rd),
-    .word_wr(psram_mux_wr),
-    .word_addr(psram_mux_addr),
-    .word_data(psram_mux_wdata),
-    .word_wstrb(psram_mux_wstrb),
-    .word_q(psram_mux_rdata),
-    .word_busy(psram_mux_busy),
-    .word_q_valid(psram_mux_rdata_valid),
+    // Controller-side word interface (from CDC bridge)
+    .word_rd(psram0_phy_rd),
+    .word_wr(psram0_phy_wr),
+    .word_addr(psram0_phy_addr),
+    .word_data(psram0_phy_wdata),
+    .word_wstrb(psram0_phy_wstrb),
+    .word_q(psram0_phy_rdata),
+    .word_busy(psram0_phy_busy),
+    .word_q_valid(psram0_phy_rdata_valid),
 
     // Physical PSRAM signals
     .cram_a(cram0_a),
@@ -296,18 +297,39 @@ psram_controller #(
     .cram_lb_n(cram0_lb_n)
 );
 
-// CRAM1 unused - tie off all outputs
-assign cram1_a     = 6'h0;
-assign cram1_dq    = 16'hZZZZ;
-assign cram1_clk   = 1'b0;
-assign cram1_adv_n = 1'b1;
-assign cram1_cre   = 1'b0;
-assign cram1_ce0_n = 1'b1;
-assign cram1_ce1_n = 1'b1;
-assign cram1_oe_n  = 1'b1;
-assign cram1_we_n  = 1'b1;
-assign cram1_ub_n  = 1'b1;
-assign cram1_lb_n  = 1'b1;
+// PSRAM Controller for CRAM1 (16MB)
+// Source domain (cpu): clk_ram_controller
+// Destination domain (controller): clk_psram_controller
+psram_controller #(
+    .CLOCK_SPEED(133.0)
+) psram1 (
+    .clk(clk_psram_controller),
+    .reset_n(reset_n),
+
+    // Controller-side word interface (from CDC bridge)
+    .word_rd(psram1_phy_rd),
+    .word_wr(psram1_phy_wr),
+    .word_addr(psram1_phy_addr),
+    .word_data(psram1_phy_wdata),
+    .word_wstrb(psram1_phy_wstrb),
+    .word_q(psram1_phy_rdata),
+    .word_busy(psram1_phy_busy),
+    .word_q_valid(psram1_phy_rdata_valid),
+
+    // Physical PSRAM signals
+    .cram_a(cram1_a),
+    .cram_dq(cram1_dq),
+    .cram_wait(cram1_wait),
+    .cram_clk(cram1_clk),
+    .cram_adv_n(cram1_adv_n),
+    .cram_cre(cram1_cre),
+    .cram_ce0_n(cram1_ce0_n),
+    .cram_ce1_n(cram1_ce1_n),
+    .cram_oe_n(cram1_oe_n),
+    .cram_we_n(cram1_we_n),
+    .cram_ub_n(cram1_ub_n),
+    .cram_lb_n(cram1_lb_n)
+);
 
 // SDRAM word interface signals (directly matching io_sdram interface)
 reg             ram1_word_rd;
@@ -330,8 +352,7 @@ wire [2:0]  cpu_sdram_burst_len;
 wire [31:0] cpu_sdram_rdata;
 wire        cpu_sdram_busy;
 
-// CPU to PSRAM interface (same clock domain as CPU - no CDC needed)
-// 22-bit word address covers 16MB (CRAM0 only)
+// CPU to PSRAM0 interface (CPU clock domain, goes through CDC bridge)
 wire        cpu_psram_rd;
 wire        cpu_psram_wr;
 wire [21:0] cpu_psram_addr;
@@ -341,7 +362,17 @@ wire [31:0] cpu_psram_rdata;
 wire        cpu_psram_busy;
 wire        cpu_psram_rdata_valid;
 
-// Muxed PSRAM signals (bridge or CPU) going to psram_controller
+// CPU to PSRAM1 interface (CPU clock domain, goes through CDC bridge)
+wire        cpu_psram1_rd;
+wire        cpu_psram1_wr;
+wire [21:0] cpu_psram1_addr;
+wire [31:0] cpu_psram1_wdata;
+wire [3:0]  cpu_psram1_wstrb;
+wire [31:0] cpu_psram1_rdata;
+wire        cpu_psram1_busy;
+wire        cpu_psram1_rdata_valid;
+
+// Muxed PSRAM0 signals (bridge or CPU) going to CDC bridge source side
 wire        psram_mux_rd;
 wire        psram_mux_wr;
 wire [21:0] psram_mux_addr;
@@ -350,6 +381,26 @@ wire [3:0]  psram_mux_wstrb;
 wire [31:0] psram_mux_rdata;
 wire        psram_mux_busy;
 wire        psram_mux_rdata_valid;
+
+// PSRAM0 physical interface (from CDC bridge to controller, clk_psram_controller domain)
+wire        psram0_phy_rd;
+wire        psram0_phy_wr;
+wire [21:0] psram0_phy_addr;
+wire [31:0] psram0_phy_wdata;
+wire [3:0]  psram0_phy_wstrb;
+wire [31:0] psram0_phy_rdata;
+wire        psram0_phy_busy;
+wire        psram0_phy_rdata_valid;
+
+// PSRAM1 physical interface (from CDC bridge to controller, clk_psram_controller domain)
+wire        psram1_phy_rd;
+wire        psram1_phy_wr;
+wire [21:0] psram1_phy_addr;
+wire [31:0] psram1_phy_wdata;
+wire [3:0]  psram1_phy_wstrb;
+wire [31:0] psram1_phy_rdata;
+wire        psram1_phy_busy;
+wire        psram1_phy_rdata_valid;
 
 // Audio output interface (between cpu_system and audio_output)
 wire        audio_sample_wr;
@@ -643,18 +694,69 @@ always @(posedge clk_ram_controller) begin
     if (!bridge_psram_wr_sync1) bridge_psram_wr_done <= 0;
 end
 
-// PSRAM mux: Bridge writes have priority, CPU access when bridge idle
-// CPU runs at same clock as PSRAM controller (no CDC needed)
+// PSRAM0 mux: Bridge writes have priority, CPU access when bridge idle
+// Mux output goes to CDC bridge source side (clk_ram_controller domain)
 assign psram_mux_rd = bridge_psram_wr_active ? 1'b0 : cpu_psram_rd;
 assign psram_mux_wr = bridge_psram_write_pending ? 1'b1 : cpu_psram_wr;
 assign psram_mux_addr = bridge_psram_write_pending ? bridge_psram_addr_ram_clk[23:2] : cpu_psram_addr;
 assign psram_mux_wdata = bridge_psram_write_pending ? bridge_psram_wr_data_ram_clk : cpu_psram_wdata;
 assign psram_mux_wstrb = bridge_psram_write_pending ? 4'b1111 : cpu_psram_wstrb;
 
-// CPU PSRAM data connections - single CRAM0
+// CPU PSRAM0 data connections
 assign cpu_psram_rdata = psram_mux_rdata;
 assign cpu_psram_busy = bridge_psram_wr_active | psram_mux_busy;
 assign cpu_psram_rdata_valid = psram_mux_rdata_valid;
+
+// CDC bridge: PSRAM0 (clk_ram_controller -> clk_psram_controller)
+psram_cdc_bridge psram0_cdc (
+    .src_clk(clk_ram_controller),
+    .src_reset_n(reset_n),
+    .src_word_rd(psram_mux_rd),
+    .src_word_wr(psram_mux_wr),
+    .src_word_addr(psram_mux_addr),
+    .src_word_data(psram_mux_wdata),
+    .src_word_wstrb(psram_mux_wstrb),
+    .src_word_q(psram_mux_rdata),
+    .src_word_busy(psram_mux_busy),
+    .src_word_q_valid(psram_mux_rdata_valid),
+
+    .dst_clk(clk_psram_controller),
+    .dst_reset_n(reset_n),
+    .dst_word_rd(psram0_phy_rd),
+    .dst_word_wr(psram0_phy_wr),
+    .dst_word_addr(psram0_phy_addr),
+    .dst_word_data(psram0_phy_wdata),
+    .dst_word_wstrb(psram0_phy_wstrb),
+    .dst_word_q(psram0_phy_rdata),
+    .dst_word_busy(psram0_phy_busy),
+    .dst_word_q_valid(psram0_phy_rdata_valid)
+);
+
+// CDC bridge: PSRAM1 (clk_ram_controller -> clk_psram_controller)
+// PSRAM1 is CPU-only (no bridge mux needed)
+psram_cdc_bridge psram1_cdc (
+    .src_clk(clk_ram_controller),
+    .src_reset_n(reset_n),
+    .src_word_rd(cpu_psram1_rd),
+    .src_word_wr(cpu_psram1_wr),
+    .src_word_addr(cpu_psram1_addr),
+    .src_word_data(cpu_psram1_wdata),
+    .src_word_wstrb(cpu_psram1_wstrb),
+    .src_word_q(cpu_psram1_rdata),
+    .src_word_busy(cpu_psram1_busy),
+    .src_word_q_valid(cpu_psram1_rdata_valid),
+
+    .dst_clk(clk_psram_controller),
+    .dst_reset_n(reset_n),
+    .dst_word_rd(psram1_phy_rd),
+    .dst_word_wr(psram1_phy_wr),
+    .dst_word_addr(psram1_phy_addr),
+    .dst_word_data(psram1_phy_wdata),
+    .dst_word_wstrb(psram1_phy_wstrb),
+    .dst_word_q(psram1_phy_rdata),
+    .dst_word_busy(psram1_phy_busy),
+    .dst_word_q_valid(psram1_phy_rdata_valid)
+);
 
 
 //
@@ -982,7 +1084,7 @@ assign video_hs = vidout_hs;
         .sdram_busy(cpu_sdram_busy),
         .sdram_accepted(cpu_sdram_accepted),
         .sdram_rdata_valid(ram1_word_q_valid),
-        // PSRAM interface (to psram_controller)
+        // PSRAM0 interface (to psram0 via CDC bridge)
         .psram_rd(cpu_psram_rd),
         .psram_wr(cpu_psram_wr),
         .psram_addr(cpu_psram_addr),
@@ -991,6 +1093,15 @@ assign video_hs = vidout_hs;
         .psram_rdata(cpu_psram_rdata),
         .psram_busy(cpu_psram_busy),
         .psram_rdata_valid(cpu_psram_rdata_valid),
+        // PSRAM1 interface (to psram1 via CDC bridge)
+        .psram1_rd(cpu_psram1_rd),
+        .psram1_wr(cpu_psram1_wr),
+        .psram1_addr(cpu_psram1_addr),
+        .psram1_wdata(cpu_psram1_wdata),
+        .psram1_wstrb(cpu_psram1_wstrb),
+        .psram1_rdata(cpu_psram1_rdata),
+        .psram1_busy(cpu_psram1_busy),
+        .psram1_rdata_valid(cpu_psram1_rdata_valid),
         // Display control
         .display_mode(display_mode),
         .fb_display_addr(fb_display_addr),
@@ -1214,9 +1325,10 @@ audio_output audio_out (
 
     wire    clk_core_12288;
     wire    clk_core_12288_90deg;
-    wire    clk_cpu;            // CPU clock (95 MHz)
-    wire    clk_ram_controller; // 95 MHz SDRAM controller clock
-    wire    clk_ram_chip;       // 95 MHz SDRAM chip clock (phase shifted)
+    wire    clk_cpu;            // CPU clock (94.857 MHz)
+    wire    clk_ram_controller; // 94.857 MHz SDRAM controller clock
+    wire    clk_ram_chip;       // 94.857 MHz SDRAM chip clock (phase shifted)
+    wire    clk_psram_controller; // 132.8 MHz PSRAM controller clock
 
     wire    pll_core_locked;
     wire    pll_ram_locked;
@@ -1241,8 +1353,11 @@ mf_pllbase mp1 (
 mf_pllram_133 mp_ram (
     .refclk         ( clk_74a ),
     .rst            ( 0 ),
-    .outclk_0       ( clk_ram_controller ), // 95 MHz for SDRAM controller
-    .outclk_1       ( clk_ram_chip ),       // 95 MHz for SDRAM chip (phase shifted)
+    .outclk_0       ( clk_ram_controller ), // 94.857 MHz for SDRAM/controller
+    .outclk_1       ( clk_ram_chip ),       // 94.857 MHz for SDRAM chip (phase shifted)
+    .outclk_2       ( clk_psram_controller ), // 132.8 MHz dedicated PSRAM clock
+    .outclk_3       ( ),                    // unused
+    .outclk_4       ( ),                    // unused
     .locked         ( pll_ram_locked )
 );
 

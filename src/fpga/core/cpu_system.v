@@ -4,7 +4,8 @@
 // - 64KB RAM for program/data (using block RAM)
 // - Memory-mapped terminal at 0x20000000
 // - SDRAM access at 0x10000000 (64MB) - includes framebuffer
-// - PSRAM access at 0x30000000 (16MB) - cram0 only
+// - PSRAM access at 0x30000000 (16MB) - cram0
+// - PSRAM access at 0x31000000 (16MB) - cram1
 // - System registers at 0x40000000
 //
 
@@ -44,7 +45,7 @@ module cpu_system (
     input wire         sdram_accepted,     // Pulses when arbiter actually forwards CPU command
     input wire         sdram_rdata_valid,  // Pulses when read data is valid
 
-    // PSRAM word interface (to psram_controller via core_top)
+    // PSRAM0 word interface (to psram_controller via core_top, CRAM0)
     output reg         psram_rd,
     output reg         psram_wr,
     output reg  [21:0] psram_addr,         // 22-bit word address (16MB addressable, CRAM0)
@@ -53,6 +54,16 @@ module cpu_system (
     input wire  [31:0] psram_rdata,
     input wire         psram_busy,
     input wire         psram_rdata_valid,  // Pulses when read data is valid
+
+    // PSRAM1 word interface (to second psram_controller via core_top, CRAM1)
+    output reg         psram1_rd,
+    output reg         psram1_wr,
+    output reg  [21:0] psram1_addr,        // 22-bit word address (16MB addressable, CRAM1)
+    output reg  [31:0] psram1_wdata,
+    output reg  [3:0]  psram1_wstrb,       // Byte enables for PSRAM1 writes
+    input wire  [31:0] psram1_rdata,
+    input wire         psram1_busy,
+    input wire         psram1_rdata_valid, // Pulses when read data is valid
 
     // Display control outputs
     output wire        display_mode,       // 0=terminal overlay, 1=framebuffer only
@@ -191,7 +202,8 @@ wire        live_mem_write = live_dbus_grant & dbus_we;
 //   Framebuffer 1: 0x10100000 - 0x10125800 (153,600 bytes)
 // 0x50000000 - 0x53FFFFFF : SDRAM uncached alias (64MB, same physical SDRAM window)
 // 0x20000000 - 0x20001FFF : Terminal VRAM
-// 0x30000000 - 0x30FFFFFF : PSRAM (16MB) - cram0 only
+// 0x30000000 - 0x30FFFFFF : PSRAM0 (16MB) - cram0
+// 0x31000000 - 0x31FFFFFF : PSRAM1 (16MB) - cram1
 // 0x40000000 - 0x400000FF : System registers
 // 0x4D000000 - 0x4DFFFFFF : Link MMIO peripheral
 // Pre-decode address regions from each bus independently.
@@ -207,6 +219,7 @@ wire dbus_sdram_select     = (dbus_byte_addr[31:26] == 6'b000100);
 wire dbus_sdram_uc_select  = (dbus_byte_addr[31:26] == 6'b010100);
 wire dbus_term_select      = (dbus_byte_addr[31:13] == 19'h10000);
 wire dbus_psram_select     = (dbus_byte_addr[31:24] == 8'h30);  // 0x30 only (16MB, CRAM0)
+wire dbus_psram1_select    = (dbus_byte_addr[31:24] == 8'h31);  // 0x31 only (16MB, CRAM1)
 wire dbus_sysreg_select    = (dbus_byte_addr[31:8]  == 24'h400000);
 wire dbus_link_select      = (dbus_byte_addr[31:24] == 8'h4D);
 wire dbus_audio_select     = (dbus_byte_addr[31:24] == 8'h4C);
@@ -217,6 +230,7 @@ wire ibus_sdram_select     = (ibus_byte_addr[31:26] == 6'b000100);
 wire ibus_sdram_uc_select  = (ibus_byte_addr[31:26] == 6'b010100);
 wire ibus_term_select      = (ibus_byte_addr[31:13] == 19'h10000);
 wire ibus_psram_select     = (ibus_byte_addr[31:24] == 8'h30);  // 0x30 only (16MB, CRAM0)
+wire ibus_psram1_select    = (ibus_byte_addr[31:24] == 8'h31);  // 0x31 only (16MB, CRAM1)
 wire ibus_sysreg_select    = (ibus_byte_addr[31:8]  == 24'h400000);
 wire ibus_link_select      = (ibus_byte_addr[31:24] == 8'h4D);
 wire ibus_audio_select     = (ibus_byte_addr[31:24] == 8'h4C);
@@ -227,6 +241,7 @@ wire live_sdram_select     = live_dbus_grant ? dbus_sdram_select     : ibus_sdra
 wire live_sdram_uc_select  = live_dbus_grant ? dbus_sdram_uc_select  : ibus_sdram_uc_select;  // 0x50000000-0x53FFFFFF (64MB uncached alias)
 wire live_term_select      = live_dbus_grant ? dbus_term_select      : ibus_term_select;      // 0x20000000-0x20001FFF
 wire live_psram_select     = live_dbus_grant ? dbus_psram_select     : ibus_psram_select;     // 0x30000000-0x30FFFFFF (16MB)
+wire live_psram1_select    = live_dbus_grant ? dbus_psram1_select    : ibus_psram1_select;    // 0x31000000-0x31FFFFFF (16MB)
 wire live_sysreg_select    = live_dbus_grant ? dbus_sysreg_select    : ibus_sysreg_select;    // 0x40000000-0x400000FF
 wire live_link_select      = live_dbus_grant ? dbus_link_select      : ibus_link_select;      // 0x4D000000-0x4DFFFFFF
 wire live_audio_select     = live_dbus_grant ? dbus_audio_select     : ibus_audio_select;     // 0x4C000000-0x4CFFFFFF (audio output)
@@ -604,8 +619,14 @@ reg psram_write_pending;
 reg psram_read_started;
 reg psram_write_started;
 reg psram_cmd_issued;
+reg psram_which;           // 0=CRAM0, 1=CRAM1
 reg [7:0] sdram_issue_wait;
 reg [7:0] psram_issue_wait;
+
+// Muxed PSRAM status/data based on which chip is active
+wire active_psram_busy        = psram_which ? psram1_busy        : psram_busy;
+wire active_psram_rdata_valid = psram_which ? psram1_rdata_valid : psram_rdata_valid;
+wire [31:0] active_psram_rdata = psram_which ? psram1_rdata      : psram_rdata;
 reg sysreg_pending;
 reg audio_pending;
 reg link_pending;
@@ -680,6 +701,7 @@ always @(posedge clk or posedge reset) begin
         psram_read_started <= 0;
         psram_write_started <= 0;
         psram_cmd_issued <= 0;
+        psram_which <= 0;
         sdram_issue_wait <= 0;
         sdram_burst_len <= 0;
         psram_issue_wait <= 0;
@@ -701,6 +723,11 @@ always @(posedge clk or posedge reset) begin
         psram_addr <= 0;
         psram_wdata <= 0;
         psram_wstrb <= 0;
+        psram1_rd <= 0;
+        psram1_wr <= 0;
+        psram1_addr <= 0;
+        psram1_wdata <= 0;
+        psram1_wstrb <= 0;
         pending_rdata <= 0;
     end else begin
         // Default: deassert ACKs and single-cycle signals
@@ -711,6 +738,8 @@ always @(posedge clk or posedge reset) begin
         sdram_burst_len <= 3'd0;
         psram_rd <= 0;
         psram_wr <= 0;
+        psram1_rd <= 0;
+        psram1_wr <= 0;
         audio_sample_wr <= 0;
         link_reg_wr <= 0;
         link_reg_rd <= 0;
@@ -769,10 +798,18 @@ always @(posedge clk or posedge reset) begin
                             sdram_read_is_prefetch <= 0;
                         end
                     end
-                end else if (live_psram_select) begin
-                    psram_addr <= live_mem_addr[23:2];  // 22-bit word address (16MB, CRAM0)
-                    psram_wdata <= live_mem_wdata;
-                    psram_wstrb <= live_mem_wstrb;  // Pass byte enables to PSRAM
+                end else if (live_psram_select || live_psram1_select) begin
+                    // PSRAM0 (0x30) or PSRAM1 (0x31) - same FSM, different port
+                    psram_which <= live_psram1_select;  // 0=CRAM0, 1=CRAM1
+                    if (live_psram1_select) begin
+                        psram1_addr <= live_mem_addr[23:2];
+                        psram1_wdata <= live_mem_wdata;
+                        psram1_wstrb <= live_mem_wstrb;
+                    end else begin
+                        psram_addr <= live_mem_addr[23:2];
+                        psram_wdata <= live_mem_wdata;
+                        psram_wstrb <= live_mem_wstrb;
+                    end
                     if (live_mem_write) begin
                         mem_pending <= 1;
                         psram_write_pending <= 1;
@@ -985,15 +1022,15 @@ always @(posedge clk or posedge reset) begin
                 end
             end else if (psram_read_pending) begin
                 if (!psram_cmd_issued) begin
-                    if (!psram_busy) begin
-                        psram_rd <= 1;
+                    if (!active_psram_busy) begin
+                        if (!psram_which) psram_rd <= 1; else psram1_rd <= 1;
                         psram_cmd_issued <= 1;
                         psram_read_started <= 0;
                         psram_issue_wait <= 0;
                     end
                 end else begin
                     if (!psram_read_started) begin
-                        if (psram_busy) begin
+                        if (active_psram_busy) begin
                             psram_read_started <= 1;
                             psram_issue_wait <= 0;
                         end else begin
@@ -1004,14 +1041,14 @@ always @(posedge clk or posedge reset) begin
                             end
                         end
                     end
-                    if (psram_rdata_valid) begin
-                        pending_rdata <= psram_rdata;
+                    if (active_psram_rdata_valid) begin
+                        pending_rdata <= active_psram_rdata;
                         if (pending_bus == BUS_DBUS) begin
                             dbus_ack <= 1;
-                            dbus_dat_miso <= psram_rdata;
+                            dbus_dat_miso <= active_psram_rdata;
                         end else begin
                             ibus_ack <= 1;
-                            ibus_dat_miso <= psram_rdata;
+                            ibus_dat_miso <= active_psram_rdata;
                         end
                         mem_pending <= 0;
                         psram_read_pending <= 0;
@@ -1024,8 +1061,8 @@ always @(posedge clk or posedge reset) begin
                 end
             end else if (psram_write_pending) begin
                 if (!psram_cmd_issued) begin
-                    if (!psram_busy) begin
-                        psram_wr <= 1;
+                    if (!active_psram_busy) begin
+                        if (!psram_which) psram_wr <= 1; else psram1_wr <= 1;
                         psram_cmd_issued <= 1;
                         psram_write_started <= 0;
                         psram_issue_wait <= 0;
@@ -1033,7 +1070,7 @@ always @(posedge clk or posedge reset) begin
                 end else begin
                     // Write completion: wait for busy HIGH then LOW after command issue.
                     // If busy never rises, retry command.
-                    if (!psram_write_started && psram_busy) begin
+                    if (!psram_write_started && active_psram_busy) begin
                         psram_write_started <= 1;
                         psram_issue_wait <= 0;
                     end else if (!psram_write_started) begin
@@ -1042,7 +1079,7 @@ always @(posedge clk or posedge reset) begin
                             psram_cmd_issued <= 0;
                             psram_issue_wait <= 0;
                         end
-                    end else if (psram_write_started && !psram_busy) begin
+                    end else if (psram_write_started && !active_psram_busy) begin
                         if (pending_bus == BUS_DBUS) begin
                             dbus_ack <= 1;
                             dbus_dat_miso <= 32'h0;

@@ -57,9 +57,10 @@ object GenPocketSM64 extends App {
           catchIllegal = true,
           catchUnaligned = true
         ),
-        dBusCmdMasterPipe = true      // required for Wishbone
+        dBusCmdMasterPipe = true,     // required for Wishbone
+        dBusRspSlavePipe = true       // pipeline response path for timing closure
       ),
-      // Cacheable: 0x1X (SDRAM), 0x30-0x37 (PSRAM)
+      // Cacheable: 0x1X (SDRAM), 0x30-0x37 (PSRAM0+PSRAM1)
       // Uncacheable: 0x0X (BRAM — already fast), 0x38-0x3F (SRAM — HW writes bypass cache), all IO
       new StaticMemoryTranslatorPlugin(
         ioRange = addr => addr(31 downto 28) =/= 0x1 &&

@@ -749,6 +749,7 @@ set_global_assignment -name VERILOG_FILE core/cpu_system.v
 set_global_assignment -name VERILOG_FILE core/io_sdram.v
 set_global_assignment -name VERILOG_FILE core/mf_pllram_133.v
 set_global_assignment -name VERILOG_FILE core/psram_controller.v
+set_global_assignment -name VERILOG_FILE core/psram_cdc_bridge.v
 set_global_assignment -name SYSTEMVERILOG_FILE core/psram.sv
 set_global_assignment -name VERILOG_FILE core/mf_linebuf.v
 set_global_assignment -name VERILOG_FILE vexriscv/VexRiscv_Full.v

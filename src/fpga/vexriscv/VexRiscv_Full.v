@@ -162,7 +162,10 @@ module VexRiscv (
   wire       [49:0]   _zz_memory_MUL_LOW_5;
   wire       [51:0]   _zz_memory_MUL_LOW_6;
   wire       [49:0]   _zz_memory_MUL_LOW_7;
-  wire       [31:0]   _zz_execute_FX_PRODUCT;
+  wire       [33:0]   _zz_execute_FX_MUL_HH;
+  wire       [33:0]   _zz_execute_FX_MUL_HL;
+  wire       [33:0]   _zz_execute_FX_MUL_LH;
+  wire       [31:0]   _zz_execute_FX_MUL_LL;
   wire       [31:0]   _zz_execute_SHIFT_RIGHT;
   wire       [32:0]   _zz_execute_SHIFT_RIGHT_1;
   wire       [32:0]   _zz_execute_SHIFT_RIGHT_2;
@@ -173,25 +176,30 @@ module VexRiscv (
   wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_2;
   wire                _zz_decode_LEGAL_INSTRUCTION_3;
   wire       [0:0]    _zz_decode_LEGAL_INSTRUCTION_4;
-  wire       [21:0]   _zz_decode_LEGAL_INSTRUCTION_5;
+  wire       [22:0]   _zz_decode_LEGAL_INSTRUCTION_5;
   wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_6;
   wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_7;
   wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_8;
   wire                _zz_decode_LEGAL_INSTRUCTION_9;
   wire       [0:0]    _zz_decode_LEGAL_INSTRUCTION_10;
-  wire       [15:0]   _zz_decode_LEGAL_INSTRUCTION_11;
+  wire       [16:0]   _zz_decode_LEGAL_INSTRUCTION_11;
   wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_12;
   wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_13;
   wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_14;
   wire                _zz_decode_LEGAL_INSTRUCTION_15;
   wire       [0:0]    _zz_decode_LEGAL_INSTRUCTION_16;
-  wire       [9:0]    _zz_decode_LEGAL_INSTRUCTION_17;
+  wire       [10:0]   _zz_decode_LEGAL_INSTRUCTION_17;
   wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_18;
   wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_19;
   wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_20;
   wire                _zz_decode_LEGAL_INSTRUCTION_21;
   wire       [0:0]    _zz_decode_LEGAL_INSTRUCTION_22;
-  wire       [3:0]    _zz_decode_LEGAL_INSTRUCTION_23;
+  wire       [4:0]    _zz_decode_LEGAL_INSTRUCTION_23;
+  wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_24;
+  wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_25;
+  wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_26;
+  wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_27;
+  wire       [31:0]   _zz_decode_LEGAL_INSTRUCTION_28;
   wire       [3:0]    _zz__zz_IBusCachedPlugin_jump_pcLoad_payload_1;
   reg        [31:0]   _zz_IBusCachedPlugin_jump_pcLoad_payload_5;
   wire       [1:0]    _zz_IBusCachedPlugin_jump_pcLoad_payload_6;
@@ -238,228 +246,246 @@ module VexRiscv (
   wire       [1:0]    _zz_writeBack_DBusCachedPlugin_rspShifted_1;
   reg        [7:0]    _zz_writeBack_DBusCachedPlugin_rspShifted_2;
   wire       [0:0]    _zz_writeBack_DBusCachedPlugin_rspShifted_3;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_1;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_2;
-  wire                _zz__zz_decode_IS_FXRCP_3;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_4;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_5;
-  wire                _zz__zz_decode_IS_FXRCP_6;
-  wire                _zz__zz_decode_IS_FXRCP_7;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_8;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_9;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_10;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_11;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_12;
-  wire       [37:0]   _zz__zz_decode_IS_FXRCP_13;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_14;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_15;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_16;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_17;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_18;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_19;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_20;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_21;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_22;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_23;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_24;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_25;
-  wire                _zz__zz_decode_IS_FXRCP_26;
-  wire                _zz__zz_decode_IS_FXRCP_27;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_28;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_29;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_30;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_31;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_32;
-  wire                _zz__zz_decode_IS_FXRCP_33;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_34;
-  wire                _zz__zz_decode_IS_FXRCP_35;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_36;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_37;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_38;
-  wire       [3:0]    _zz__zz_decode_IS_FXRCP_39;
-  wire                _zz__zz_decode_IS_FXRCP_40;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_41;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_42;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_43;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_44;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_45;
-  wire                _zz__zz_decode_IS_FXRCP_46;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_47;
-  wire                _zz__zz_decode_IS_FXRCP_48;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_49;
-  wire       [33:0]   _zz__zz_decode_IS_FXRCP_50;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_51;
-  wire                _zz__zz_decode_IS_FXRCP_52;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_53;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_54;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_55;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_56;
-  wire                _zz__zz_decode_IS_FXRCP_57;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_58;
-  wire                _zz__zz_decode_IS_FXRCP_59;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_60;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_61;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_62;
-  wire                _zz__zz_decode_IS_FXRCP_63;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_64;
-  wire                _zz__zz_decode_IS_FXRCP_65;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_66;
-  wire       [30:0]   _zz__zz_decode_IS_FXRCP_67;
-  wire                _zz__zz_decode_IS_FXRCP_68;
-  wire                _zz__zz_decode_IS_FXRCP_69;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_70;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_71;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_72;
-  wire                _zz__zz_decode_IS_FXRCP_73;
-  wire                _zz__zz_decode_IS_FXRCP_74;
-  wire       [28:0]   _zz__zz_decode_IS_FXRCP_75;
-  wire                _zz__zz_decode_IS_FXRCP_76;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_77;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_78;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_79;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_80;
-  wire       [26:0]   _zz__zz_decode_IS_FXRCP_81;
-  wire                _zz__zz_decode_IS_FXRCP_82;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_83;
-  wire       [24:0]   _zz__zz_decode_IS_FXRCP_84;
-  wire                _zz__zz_decode_IS_FXRCP_85;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_86;
-  wire                _zz__zz_decode_IS_FXRCP_87;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_88;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_89;
-  wire                _zz__zz_decode_IS_FXRCP_90;
-  wire                _zz__zz_decode_IS_FXRCP_91;
-  wire       [20:0]   _zz__zz_decode_IS_FXRCP_92;
-  wire                _zz__zz_decode_IS_FXRCP_93;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_94;
-  wire                _zz__zz_decode_IS_FXRCP_95;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_96;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_97;
-  wire                _zz__zz_decode_IS_FXRCP_98;
-  wire                _zz__zz_decode_IS_FXRCP_99;
-  wire       [16:0]   _zz__zz_decode_IS_FXRCP_100;
-  wire                _zz__zz_decode_IS_FXRCP_101;
-  wire       [2:0]    _zz__zz_decode_IS_FXRCP_102;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_103;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_104;
-  wire                _zz__zz_decode_IS_FXRCP_105;
-  wire                _zz__zz_decode_IS_FXRCP_106;
-  wire                _zz__zz_decode_IS_FXRCP_107;
-  wire                _zz__zz_decode_IS_FXRCP_108;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_109;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_110;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_111;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_112;
-  wire       [12:0]   _zz__zz_decode_IS_FXRCP_113;
-  wire       [5:0]    _zz__zz_decode_IS_FXRCP_114;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_115;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_116;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_117;
-  wire       [2:0]    _zz__zz_decode_IS_FXRCP_118;
-  wire                _zz__zz_decode_IS_FXRCP_119;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_120;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_121;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_122;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_123;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_124;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_125;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_126;
-  wire                _zz__zz_decode_IS_FXRCP_127;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_128;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_129;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_130;
-  wire       [2:0]    _zz__zz_decode_IS_FXRCP_131;
-  wire                _zz__zz_decode_IS_FXRCP_132;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_133;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_134;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_135;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_136;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_137;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_138;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_139;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_140;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_141;
-  wire       [7:0]    _zz__zz_decode_IS_FXRCP_142;
-  wire                _zz__zz_decode_IS_FXRCP_143;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_144;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_145;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_146;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_147;
-  wire       [5:0]    _zz__zz_decode_IS_FXRCP_148;
-  wire                _zz__zz_decode_IS_FXRCP_149;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_150;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_151;
-  wire       [3:0]    _zz__zz_decode_IS_FXRCP_152;
-  wire                _zz__zz_decode_IS_FXRCP_153;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_154;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_155;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_156;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_157;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_158;
-  wire                _zz__zz_decode_IS_FXRCP_159;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_160;
-  wire                _zz__zz_decode_IS_FXRCP_161;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_162;
-  wire       [9:0]    _zz__zz_decode_IS_FXRCP_163;
-  wire       [3:0]    _zz__zz_decode_IS_FXRCP_164;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_165;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_166;
-  wire                _zz__zz_decode_IS_FXRCP_167;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_168;
-  wire                _zz__zz_decode_IS_FXRCP_169;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_170;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_171;
-  wire                _zz__zz_decode_IS_FXRCP_172;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_173;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_174;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_175;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_176;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_177;
-  wire       [6:0]    _zz__zz_decode_IS_FXRCP_178;
-  wire                _zz__zz_decode_IS_FXRCP_179;
-  wire                _zz__zz_decode_IS_FXRCP_180;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_181;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_182;
-  wire       [8:0]    _zz__zz_decode_IS_FXRCP_183;
-  wire                _zz__zz_decode_IS_FXRCP_184;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_185;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_186;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_187;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_188;
-  wire       [6:0]    _zz__zz_decode_IS_FXRCP_189;
-  wire                _zz__zz_decode_IS_FXRCP_190;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_191;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_192;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_193;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_194;
-  wire       [4:0]    _zz__zz_decode_IS_FXRCP_195;
-  wire                _zz__zz_decode_IS_FXRCP_196;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_197;
-  wire       [2:0]    _zz__zz_decode_IS_FXRCP_198;
-  wire       [4:0]    _zz__zz_decode_IS_FXRCP_199;
-  wire                _zz__zz_decode_IS_FXRCP_200;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_201;
-  wire       [2:0]    _zz__zz_decode_IS_FXRCP_202;
-  wire                _zz__zz_decode_IS_FXRCP_203;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_204;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_205;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_206;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_207;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_208;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_209;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_210;
-  wire       [2:0]    _zz__zz_decode_IS_FXRCP_211;
-  wire                _zz__zz_decode_IS_FXRCP_212;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_213;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_214;
-  wire                _zz__zz_decode_IS_FXRCP_215;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_216;
-  wire       [1:0]    _zz__zz_decode_IS_FXRCP_217;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_218;
-  wire       [0:0]    _zz__zz_decode_IS_FXRCP_219;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_220;
-  wire       [31:0]   _zz__zz_decode_IS_FXRCP_221;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_1;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_2;
+  wire                _zz__zz_decode_IS_FXCLAMP_3;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_4;
+  wire                _zz__zz_decode_IS_FXCLAMP_5;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_6;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_7;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_8;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_9;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_10;
+  wire       [1:0]    _zz__zz_decode_IS_FXCLAMP_11;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_12;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_13;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_14;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_15;
+  wire       [38:0]   _zz__zz_decode_IS_FXCLAMP_16;
+  wire       [2:0]    _zz__zz_decode_IS_FXCLAMP_17;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_18;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_19;
+  wire                _zz__zz_decode_IS_FXCLAMP_20;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_21;
+  wire                _zz__zz_decode_IS_FXCLAMP_22;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_23;
+  wire                _zz__zz_decode_IS_FXCLAMP_24;
+  wire                _zz__zz_decode_IS_FXCLAMP_25;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_26;
+  wire                _zz__zz_decode_IS_FXCLAMP_27;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_28;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_29;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_30;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_31;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_32;
+  wire       [2:0]    _zz__zz_decode_IS_FXCLAMP_33;
+  wire                _zz__zz_decode_IS_FXCLAMP_34;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_35;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_36;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_37;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_38;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_39;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_40;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_41;
+  wire       [34:0]   _zz__zz_decode_IS_FXCLAMP_42;
+  wire       [4:0]    _zz__zz_decode_IS_FXCLAMP_43;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_44;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_45;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_46;
+  wire       [2:0]    _zz__zz_decode_IS_FXCLAMP_47;
+  wire                _zz__zz_decode_IS_FXCLAMP_48;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_49;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_50;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_51;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_52;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_53;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_54;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_55;
+  wire                _zz__zz_decode_IS_FXCLAMP_56;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_57;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_58;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_59;
+  wire       [2:0]    _zz__zz_decode_IS_FXCLAMP_60;
+  wire                _zz__zz_decode_IS_FXCLAMP_61;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_62;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_63;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_64;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_65;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_66;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_67;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_68;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_69;
+  wire                _zz__zz_decode_IS_FXCLAMP_70;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_71;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_72;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_73;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_74;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_75;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_76;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_77;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_78;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_79;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_80;
+  wire       [29:0]   _zz__zz_decode_IS_FXCLAMP_81;
+  wire                _zz__zz_decode_IS_FXCLAMP_82;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_83;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_84;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_85;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_86;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_87;
+  wire       [1:0]    _zz__zz_decode_IS_FXCLAMP_88;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_89;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_90;
+  wire       [27:0]   _zz__zz_decode_IS_FXCLAMP_91;
+  wire                _zz__zz_decode_IS_FXCLAMP_92;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_93;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_94;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_95;
+  wire       [25:0]   _zz__zz_decode_IS_FXCLAMP_96;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_97;
+  wire                _zz__zz_decode_IS_FXCLAMP_98;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_99;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_100;
+  wire       [22:0]   _zz__zz_decode_IS_FXCLAMP_101;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_102;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_103;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_104;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_105;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_106;
+  wire                _zz__zz_decode_IS_FXCLAMP_107;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_108;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_109;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_110;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_111;
+  wire       [17:0]   _zz__zz_decode_IS_FXCLAMP_112;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_113;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_114;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_115;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_116;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_117;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_118;
+  wire                _zz__zz_decode_IS_FXCLAMP_119;
+  wire                _zz__zz_decode_IS_FXCLAMP_120;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_121;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_122;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_123;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_124;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_125;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_126;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_127;
+  wire       [1:0]    _zz__zz_decode_IS_FXCLAMP_128;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_129;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_130;
+  wire       [13:0]   _zz__zz_decode_IS_FXCLAMP_131;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_132;
+  wire                _zz__zz_decode_IS_FXCLAMP_133;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_134;
+  wire       [3:0]    _zz__zz_decode_IS_FXCLAMP_135;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_136;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_137;
+  wire                _zz__zz_decode_IS_FXCLAMP_138;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_139;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_140;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_141;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_142;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_143;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_144;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_145;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_146;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_147;
+  wire       [4:0]    _zz__zz_decode_IS_FXCLAMP_148;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_149;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_150;
+  wire                _zz__zz_decode_IS_FXCLAMP_151;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_152;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_153;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_154;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_155;
+  wire       [1:0]    _zz__zz_decode_IS_FXCLAMP_156;
+  wire                _zz__zz_decode_IS_FXCLAMP_157;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_158;
+  wire                _zz__zz_decode_IS_FXCLAMP_159;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_160;
+  wire       [10:0]   _zz__zz_decode_IS_FXCLAMP_161;
+  wire       [8:0]    _zz__zz_decode_IS_FXCLAMP_162;
+  wire                _zz__zz_decode_IS_FXCLAMP_163;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_164;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_165;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_166;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_167;
+  wire       [5:0]    _zz__zz_decode_IS_FXCLAMP_168;
+  wire                _zz__zz_decode_IS_FXCLAMP_169;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_170;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_171;
+  wire       [3:0]    _zz__zz_decode_IS_FXCLAMP_172;
+  wire                _zz__zz_decode_IS_FXCLAMP_173;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_174;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_175;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_176;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_177;
+  wire       [1:0]    _zz__zz_decode_IS_FXCLAMP_178;
+  wire                _zz__zz_decode_IS_FXCLAMP_179;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_180;
+  wire                _zz__zz_decode_IS_FXCLAMP_181;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_182;
+  wire                _zz__zz_decode_IS_FXCLAMP_183;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_184;
+  wire       [1:0]    _zz__zz_decode_IS_FXCLAMP_185;
+  wire                _zz__zz_decode_IS_FXCLAMP_186;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_187;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_188;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_189;
+  wire       [1:0]    _zz__zz_decode_IS_FXCLAMP_190;
+  wire                _zz__zz_decode_IS_FXCLAMP_191;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_192;
+  wire       [7:0]    _zz__zz_decode_IS_FXCLAMP_193;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_194;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_195;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_196;
+  wire                _zz__zz_decode_IS_FXCLAMP_197;
+  wire                _zz__zz_decode_IS_FXCLAMP_198;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_199;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_200;
+  wire       [8:0]    _zz__zz_decode_IS_FXCLAMP_201;
+  wire                _zz__zz_decode_IS_FXCLAMP_202;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_203;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_204;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_205;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_206;
+  wire       [6:0]    _zz__zz_decode_IS_FXCLAMP_207;
+  wire                _zz__zz_decode_IS_FXCLAMP_208;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_209;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_210;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_211;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_212;
+  wire       [4:0]    _zz__zz_decode_IS_FXCLAMP_213;
+  wire                _zz__zz_decode_IS_FXCLAMP_214;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_215;
+  wire       [2:0]    _zz__zz_decode_IS_FXCLAMP_216;
+  wire       [4:0]    _zz__zz_decode_IS_FXCLAMP_217;
+  wire                _zz__zz_decode_IS_FXCLAMP_218;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_219;
+  wire       [2:0]    _zz__zz_decode_IS_FXCLAMP_220;
+  wire                _zz__zz_decode_IS_FXCLAMP_221;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_222;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_223;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_224;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_225;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_226;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_227;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_228;
+  wire       [2:0]    _zz__zz_decode_IS_FXCLAMP_229;
+  wire                _zz__zz_decode_IS_FXCLAMP_230;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_231;
+  wire       [1:0]    _zz__zz_decode_IS_FXCLAMP_232;
+  wire                _zz__zz_decode_IS_FXCLAMP_233;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_234;
+  wire       [1:0]    _zz__zz_decode_IS_FXCLAMP_235;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_236;
+  wire       [0:0]    _zz__zz_decode_IS_FXCLAMP_237;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_238;
+  wire       [31:0]   _zz__zz_decode_IS_FXCLAMP_239;
   wire                _zz_RegFilePlugin_regFile_port;
   wire                _zz_decode_RegFilePlugin_rs1Data;
   wire                _zz_RegFilePlugin_regFile_port_1;
@@ -511,27 +537,43 @@ module VexRiscv (
   wire       [0:0]    _zz_FpuPlugin_pendings_5;
   wire       [5:0]    _zz_FpuPlugin_pendings_6;
   wire       [0:0]    _zz_FpuPlugin_pendings_7;
+  wire       [15:0]   _zz_execute_FixedPointMacPlugin_aULow;
+  wire       [15:0]   _zz_execute_FixedPointMacPlugin_bULow;
+  wire       [15:0]   _zz_execute_FixedPointMacPlugin_aHigh;
+  wire       [15:0]   _zz_execute_FixedPointMacPlugin_bHigh;
   wire       [31:0]   _zz_execute_FixedPointMacPlugin_absVal;
-  wire       [47:0]   _zz__zz_decode_RS2_4;
+  wire       [31:0]   _zz__zz_decode_RS2;
   wire       [31:0]   _zz__zz_decode_RS2_1;
-  wire       [31:0]   _zz__zz_decode_RS2_5;
-  wire       [31:0]   _zz__zz_decode_RS2_6;
-  wire       [31:0]   _zz__zz_decode_RS2_6_1;
-  wire       [4:0]    _zz__zz_decode_RS2_6_2;
+  wire       [47:0]   _zz_memory_FixedPointMacPlugin_fxSum;
+  wire       [47:0]   _zz_memory_FixedPointMacPlugin_fxSum_1;
+  wire       [47:0]   _zz_memory_FixedPointMacPlugin_fxSum_2;
+  wire       [16:0]   _zz_memory_FixedPointMacPlugin_fxSum_3;
+  wire       [47:0]   _zz_memory_FixedPointMacPlugin_fxSum_4;
+  wire       [47:0]   _zz_memory_FixedPointMacPlugin_fxSum_5;
+  wire       [47:0]   _zz_memory_FixedPointMacPlugin_fxSum_6;
+  wire       [31:0]   _zz_memory_FixedPointMacPlugin_fxSum_7;
+  wire       [31:0]   _zz_memory_FixedPointMacPlugin_fxSum_8;
+  wire       [47:0]   _zz__zz_decode_RS2_4;
   wire       [31:0]   _zz__zz_decode_RS2_1_1;
+  wire       [31:0]   _zz__zz_decode_RS2_7;
+  wire       [31:0]   _zz__zz_decode_RS2_7_1;
+  wire       [4:0]    _zz__zz_decode_RS2_7_2;
   wire       [31:0]   _zz__zz_decode_RS2_1_2;
   wire       [31:0]   _zz__zz_decode_RS2_1_3;
   wire       [31:0]   _zz__zz_decode_RS2_1_4;
   wire       [31:0]   _zz__zz_decode_RS2_1_5;
+  wire       [31:0]   _zz__zz_decode_RS2_1_6;
   wire       [26:0]   _zz_iBusWishbone_ADR_1;
   wire       [31:0]   writeBack_MEMORY_LOAD_DATA;
   wire       [51:0]   memory_MUL_LOW;
   wire                execute_RCP_ZERO;
   wire                execute_RCP_SIGN;
   wire       [4:0]    execute_RCP_SHIFT;
-  wire       [31:0]   execute_RCP_XY;
-  wire       [15:0]   execute_RCP_Y0;
-  wire       [31:0]   execute_FX_PRODUCT;
+  wire       [31:0]   execute_RCP_Y1;
+  wire       [33:0]   execute_FX_MUL_HH;
+  wire       [33:0]   execute_FX_MUL_HL;
+  wire       [33:0]   execute_FX_MUL_LH;
+  wire       [31:0]   execute_FX_MUL_LL;
   wire       [31:0]   execute_BRANCH_CALC;
   wire                execute_BRANCH_DO;
   wire       [33:0]   memory_MUL_HH;
@@ -554,11 +596,13 @@ module VexRiscv (
   wire                decode_PREDICTION_HAD_BRANCHED1;
   wire                decode_SRC2_FORCE_ZERO;
   wire       [31:0]   memory_RS1;
-  wire                execute_IS_FXRCP;
+  wire                decode_IS_FXCLAMP;
   wire                decode_IS_FXRCP;
   wire                execute_IS_FXMACR;
   wire                decode_IS_FXMACR;
+  wire                execute_IS_FXMACS;
   wire                decode_IS_FXMACS;
+  wire                execute_IS_FXMUL;
   wire                decode_IS_FXMUL;
   wire       [3:0]    memory_FPU_OPCODE;
   wire       [3:0]    _zz_memory_FPU_OPCODE;
@@ -634,15 +678,21 @@ module VexRiscv (
   wire                memory_RCP_ZERO;
   wire                memory_RCP_SIGN;
   wire       [4:0]    memory_RCP_SHIFT;
-  wire       [31:0]   memory_RCP_XY;
-  wire       [15:0]   memory_RCP_Y0;
+  wire       [31:0]   memory_RCP_Y1;
   wire                memory_IS_FXRCP;
   wire                memory_IS_FXMACR;
   wire                memory_IS_FXMACS;
   wire                memory_IS_FXMUL;
-  wire       [31:0]   memory_FX_PRODUCT;
-  wire                execute_IS_FXMACS;
-  wire                execute_IS_FXMUL;
+  wire       [33:0]   memory_FX_MUL_HH;
+  wire       [33:0]   memory_FX_MUL_HL;
+  wire       [33:0]   memory_FX_MUL_LH;
+  wire       [31:0]   memory_FX_MUL_LL;
+  wire                execute_IS_FXCLAMP;
+  wire                execute_IS_FXRCP;
+  reg                 _zz_execute_RCP_ZERO;
+  reg                 _zz_execute_RCP_SIGN;
+  reg        [4:0]    _zz_execute_RCP_SHIFT;
+  reg        [31:0]   _zz_execute_RCP_Y1;
   reg                 _zz_memory_to_writeBack_FPU_FORKED;
   reg                 _zz_execute_to_memory_FPU_FORKED;
   reg                 _zz_decode_to_execute_FPU_FORKED;
@@ -1179,6 +1229,10 @@ module VexRiscv (
   reg        [2:0]    io_mem_cmd_rData_size;
   reg                 io_mem_cmd_rData_last;
   wire                when_Stream_l477;
+  reg                 dBus_rsp_regNext_valid;
+  reg                 dBus_rsp_regNext_payload_last;
+  reg        [31:0]   dBus_rsp_regNext_payload_data;
+  reg                 dBus_rsp_regNext_payload_error;
   reg        [31:0]   DBusCachedPlugin_rspCounter;
   wire                when_DBusCachedPlugin_l353;
   wire       [1:0]    execute_DBusCachedPlugin_size;
@@ -1203,17 +1257,17 @@ module VexRiscv (
   reg        [31:0]   _zz_writeBack_DBusCachedPlugin_rspFormated_3;
   reg        [31:0]   writeBack_DBusCachedPlugin_rspFormated;
   wire                when_DBusCachedPlugin_l581;
-  wire       [44:0]   _zz_decode_IS_FXRCP;
-  wire                _zz_decode_IS_FXRCP_1;
-  wire                _zz_decode_IS_FXRCP_2;
-  wire                _zz_decode_IS_FXRCP_3;
-  wire                _zz_decode_IS_FXRCP_4;
-  wire                _zz_decode_IS_FXRCP_5;
-  wire                _zz_decode_IS_FXRCP_6;
-  wire                _zz_decode_IS_FXRCP_7;
-  wire                _zz_decode_IS_FXRCP_8;
-  wire                _zz_decode_IS_FXRCP_9;
-  wire                _zz_decode_IS_FXRCP_10;
+  wire       [45:0]   _zz_decode_IS_FXCLAMP;
+  wire                _zz_decode_IS_FXCLAMP_1;
+  wire                _zz_decode_IS_FXCLAMP_2;
+  wire                _zz_decode_IS_FXCLAMP_3;
+  wire                _zz_decode_IS_FXCLAMP_4;
+  wire                _zz_decode_IS_FXCLAMP_5;
+  wire                _zz_decode_IS_FXCLAMP_6;
+  wire                _zz_decode_IS_FXCLAMP_7;
+  wire                _zz_decode_IS_FXCLAMP_8;
+  wire                _zz_decode_IS_FXCLAMP_9;
+  wire                _zz_decode_IS_FXCLAMP_10;
   wire       [1:0]    _zz_decode_SRC1_CTRL_2;
   wire       [1:0]    _zz_decode_ALU_CTRL_2;
   wire       [1:0]    _zz_decode_SRC2_CTRL_2;
@@ -1487,58 +1541,81 @@ module VexRiscv (
   reg        [31:0]   writeBack_FpuPlugin_commit_rData_value;
   wire       [3:0]    _zz_writeBack_FpuPlugin_commit_s2mPipe_payload_opcode;
   reg        [47:0]   _zz_decode_RS2_4;
-  wire                execute_FixedPointMacPlugin_isFx;
   wire       [31:0]   execute_FixedPointMacPlugin_a;
   wire       [31:0]   execute_FixedPointMacPlugin_b;
-  wire       [63:0]   execute_FixedPointMacPlugin_product;
-  wire       [31:0]   execute_FixedPointMacPlugin_rs1;
+  wire       [15:0]   execute_FixedPointMacPlugin_aULow;
+  wire       [15:0]   execute_FixedPointMacPlugin_bULow;
+  wire       [16:0]   execute_FixedPointMacPlugin_aSLow;
+  wire       [16:0]   execute_FixedPointMacPlugin_bSLow;
+  wire       [16:0]   execute_FixedPointMacPlugin_aHigh;
+  wire       [16:0]   execute_FixedPointMacPlugin_bHigh;
+  reg        [1:0]    execute_FixedPointMacPlugin_rcpPhase;
+  reg        [31:0]   execute_FixedPointMacPlugin_rcpAbsReg;
+  reg        [4:0]    execute_FixedPointMacPlugin_rcpClzReg;
+  reg                 execute_FixedPointMacPlugin_rcpSignReg;
+  reg                 execute_FixedPointMacPlugin_rcpZeroReg;
+  reg        [15:0]   execute_FixedPointMacPlugin_rcpY0Reg;
+  reg        [31:0]   execute_FixedPointMacPlugin_rcpXYReg;
   wire                execute_FixedPointMacPlugin_isNeg;
   wire                execute_FixedPointMacPlugin_isZero;
   wire       [31:0]   execute_FixedPointMacPlugin_absVal;
   reg        [4:0]    execute_FixedPointMacPlugin_clz;
-  wire                when_FixedPointMacPlugin_l152;
-  wire                when_FixedPointMacPlugin_l152_1;
-  wire                when_FixedPointMacPlugin_l152_2;
-  wire                when_FixedPointMacPlugin_l152_3;
-  wire                when_FixedPointMacPlugin_l152_4;
-  wire                when_FixedPointMacPlugin_l152_5;
-  wire                when_FixedPointMacPlugin_l152_6;
-  wire                when_FixedPointMacPlugin_l152_7;
-  wire                when_FixedPointMacPlugin_l152_8;
-  wire                when_FixedPointMacPlugin_l152_9;
-  wire                when_FixedPointMacPlugin_l152_10;
-  wire                when_FixedPointMacPlugin_l152_11;
-  wire                when_FixedPointMacPlugin_l152_12;
-  wire                when_FixedPointMacPlugin_l152_13;
-  wire                when_FixedPointMacPlugin_l152_14;
-  wire                when_FixedPointMacPlugin_l152_15;
-  wire                when_FixedPointMacPlugin_l152_16;
-  wire                when_FixedPointMacPlugin_l152_17;
-  wire                when_FixedPointMacPlugin_l152_18;
-  wire                when_FixedPointMacPlugin_l152_19;
-  wire                when_FixedPointMacPlugin_l152_20;
-  wire                when_FixedPointMacPlugin_l152_21;
-  wire                when_FixedPointMacPlugin_l152_22;
-  wire                when_FixedPointMacPlugin_l152_23;
-  wire                when_FixedPointMacPlugin_l152_24;
-  wire                when_FixedPointMacPlugin_l152_25;
-  wire                when_FixedPointMacPlugin_l152_26;
-  wire                when_FixedPointMacPlugin_l152_27;
-  wire                when_FixedPointMacPlugin_l152_28;
-  wire                when_FixedPointMacPlugin_l152_29;
-  wire                when_FixedPointMacPlugin_l152_30;
-  wire                when_FixedPointMacPlugin_l152_31;
+  wire                when_FixedPointMacPlugin_l205;
+  wire                when_FixedPointMacPlugin_l205_1;
+  wire                when_FixedPointMacPlugin_l205_2;
+  wire                when_FixedPointMacPlugin_l205_3;
+  wire                when_FixedPointMacPlugin_l205_4;
+  wire                when_FixedPointMacPlugin_l205_5;
+  wire                when_FixedPointMacPlugin_l205_6;
+  wire                when_FixedPointMacPlugin_l205_7;
+  wire                when_FixedPointMacPlugin_l205_8;
+  wire                when_FixedPointMacPlugin_l205_9;
+  wire                when_FixedPointMacPlugin_l205_10;
+  wire                when_FixedPointMacPlugin_l205_11;
+  wire                when_FixedPointMacPlugin_l205_12;
+  wire                when_FixedPointMacPlugin_l205_13;
+  wire                when_FixedPointMacPlugin_l205_14;
+  wire                when_FixedPointMacPlugin_l205_15;
+  wire                when_FixedPointMacPlugin_l205_16;
+  wire                when_FixedPointMacPlugin_l205_17;
+  wire                when_FixedPointMacPlugin_l205_18;
+  wire                when_FixedPointMacPlugin_l205_19;
+  wire                when_FixedPointMacPlugin_l205_20;
+  wire                when_FixedPointMacPlugin_l205_21;
+  wire                when_FixedPointMacPlugin_l205_22;
+  wire                when_FixedPointMacPlugin_l205_23;
+  wire                when_FixedPointMacPlugin_l205_24;
+  wire                when_FixedPointMacPlugin_l205_25;
+  wire                when_FixedPointMacPlugin_l205_26;
+  wire                when_FixedPointMacPlugin_l205_27;
+  wire                when_FixedPointMacPlugin_l205_28;
+  wire                when_FixedPointMacPlugin_l205_29;
+  wire                when_FixedPointMacPlugin_l205_30;
+  wire                when_FixedPointMacPlugin_l205_31;
   wire       [31:0]   execute_FixedPointMacPlugin_normalized;
   wire       [15:0]   execute_FixedPointMacPlugin_xNorm;
   wire       [7:0]    execute_FixedPointMacPlugin_lutIdx;
   wire       [15:0]   execute_FixedPointMacPlugin_y0;
   wire       [31:0]   execute_FixedPointMacPlugin_xy;
-  wire       [31:0]   memory_FixedPointMacPlugin_fxProduct;
-  wire                when_FixedPointMacPlugin_l188;
-  wire                when_FixedPointMacPlugin_l195;
+  wire       [31:0]   execute_FixedPointMacPlugin_correction;
+  wire       [15:0]   execute_FixedPointMacPlugin_corrHi;
+  wire       [31:0]   execute_FixedPointMacPlugin_y1_full;
+  wire                when_FixedPointMacPlugin_l229;
+  wire                when_FixedPointMacPlugin_l230;
+  wire                when_FixedPointMacPlugin_l238;
+  wire                when_FixedPointMacPlugin_l254;
   wire       [31:0]   _zz_decode_RS2_5;
   wire       [31:0]   _zz_decode_RS2_6;
+  wire       [31:0]   memory_FixedPointMacPlugin_ll;
+  wire       [33:0]   memory_FixedPointMacPlugin_lh;
+  wire       [33:0]   memory_FixedPointMacPlugin_hl;
+  wire       [33:0]   memory_FixedPointMacPlugin_hh;
+  wire       [47:0]   memory_FixedPointMacPlugin_fxSum;
+  wire       [31:0]   memory_FixedPointMacPlugin_fxProduct;
+  wire                when_FixedPointMacPlugin_l293;
+  wire                when_FixedPointMacPlugin_l300;
   wire       [31:0]   _zz_decode_RS2_7;
+  wire       [31:0]   _zz_decode_RS2_8;
   wire                when_Pipeline_l124;
   reg        [31:0]   decode_to_execute_PC;
   wire                when_Pipeline_l124_1;
@@ -1672,70 +1749,76 @@ module VexRiscv (
   wire                when_Pipeline_l124_64;
   reg                 execute_to_memory_IS_FXRCP;
   wire                when_Pipeline_l124_65;
-  reg        [31:0]   decode_to_execute_RS1;
+  reg                 decode_to_execute_IS_FXCLAMP;
   wire                when_Pipeline_l124_66;
-  reg        [31:0]   execute_to_memory_RS1;
+  reg        [31:0]   decode_to_execute_RS1;
   wire                when_Pipeline_l124_67;
-  reg        [31:0]   memory_to_writeBack_RS1;
+  reg        [31:0]   execute_to_memory_RS1;
   wire                when_Pipeline_l124_68;
-  reg        [31:0]   decode_to_execute_RS2;
+  reg        [31:0]   memory_to_writeBack_RS1;
   wire                when_Pipeline_l124_69;
-  reg                 decode_to_execute_SRC2_FORCE_ZERO;
+  reg        [31:0]   decode_to_execute_RS2;
   wire                when_Pipeline_l124_70;
-  reg                 decode_to_execute_PREDICTION_HAD_BRANCHED1;
+  reg                 decode_to_execute_SRC2_FORCE_ZERO;
   wire                when_Pipeline_l124_71;
-  reg                 decode_to_execute_CSR_WRITE_OPCODE;
+  reg                 decode_to_execute_PREDICTION_HAD_BRANCHED1;
   wire                when_Pipeline_l124_72;
-  reg                 decode_to_execute_CSR_READ_OPCODE;
+  reg                 decode_to_execute_CSR_WRITE_OPCODE;
   wire                when_Pipeline_l124_73;
-  reg                 decode_to_execute_FPU_FORKED;
+  reg                 decode_to_execute_CSR_READ_OPCODE;
   wire                when_Pipeline_l124_74;
-  reg                 execute_to_memory_FPU_FORKED;
+  reg                 decode_to_execute_FPU_FORKED;
   wire                when_Pipeline_l124_75;
-  reg                 memory_to_writeBack_FPU_FORKED;
+  reg                 execute_to_memory_FPU_FORKED;
   wire                when_Pipeline_l124_76;
-  reg                 decode_to_execute_FPU_COMMIT_LOAD;
+  reg                 memory_to_writeBack_FPU_FORKED;
   wire                when_Pipeline_l124_77;
-  reg                 execute_to_memory_FPU_COMMIT_LOAD;
+  reg                 decode_to_execute_FPU_COMMIT_LOAD;
   wire                when_Pipeline_l124_78;
-  reg                 memory_to_writeBack_FPU_COMMIT_LOAD;
+  reg                 execute_to_memory_FPU_COMMIT_LOAD;
   wire                when_Pipeline_l124_79;
-  reg        [31:0]   execute_to_memory_MEMORY_STORE_DATA_RF;
+  reg                 memory_to_writeBack_FPU_COMMIT_LOAD;
   wire                when_Pipeline_l124_80;
-  reg        [31:0]   memory_to_writeBack_MEMORY_STORE_DATA_RF;
+  reg        [31:0]   execute_to_memory_MEMORY_STORE_DATA_RF;
   wire                when_Pipeline_l124_81;
-  reg        [31:0]   execute_to_memory_REGFILE_WRITE_DATA;
+  reg        [31:0]   memory_to_writeBack_MEMORY_STORE_DATA_RF;
   wire                when_Pipeline_l124_82;
-  reg        [31:0]   memory_to_writeBack_REGFILE_WRITE_DATA;
+  reg        [31:0]   execute_to_memory_REGFILE_WRITE_DATA;
   wire                when_Pipeline_l124_83;
-  reg        [31:0]   execute_to_memory_SHIFT_RIGHT;
+  reg        [31:0]   memory_to_writeBack_REGFILE_WRITE_DATA;
   wire                when_Pipeline_l124_84;
-  reg        [31:0]   execute_to_memory_MUL_LL;
+  reg        [31:0]   execute_to_memory_SHIFT_RIGHT;
   wire                when_Pipeline_l124_85;
-  reg        [33:0]   execute_to_memory_MUL_LH;
+  reg        [31:0]   execute_to_memory_MUL_LL;
   wire                when_Pipeline_l124_86;
-  reg        [33:0]   execute_to_memory_MUL_HL;
+  reg        [33:0]   execute_to_memory_MUL_LH;
   wire                when_Pipeline_l124_87;
-  reg        [33:0]   execute_to_memory_MUL_HH;
+  reg        [33:0]   execute_to_memory_MUL_HL;
   wire                when_Pipeline_l124_88;
-  reg        [33:0]   memory_to_writeBack_MUL_HH;
+  reg        [33:0]   execute_to_memory_MUL_HH;
   wire                when_Pipeline_l124_89;
-  reg                 execute_to_memory_BRANCH_DO;
+  reg        [33:0]   memory_to_writeBack_MUL_HH;
   wire                when_Pipeline_l124_90;
-  reg        [31:0]   execute_to_memory_BRANCH_CALC;
+  reg                 execute_to_memory_BRANCH_DO;
   wire                when_Pipeline_l124_91;
-  reg        [31:0]   execute_to_memory_FX_PRODUCT;
+  reg        [31:0]   execute_to_memory_BRANCH_CALC;
   wire                when_Pipeline_l124_92;
-  reg        [15:0]   execute_to_memory_RCP_Y0;
+  reg        [31:0]   execute_to_memory_FX_MUL_LL;
   wire                when_Pipeline_l124_93;
-  reg        [31:0]   execute_to_memory_RCP_XY;
+  reg        [33:0]   execute_to_memory_FX_MUL_LH;
   wire                when_Pipeline_l124_94;
-  reg        [4:0]    execute_to_memory_RCP_SHIFT;
+  reg        [33:0]   execute_to_memory_FX_MUL_HL;
   wire                when_Pipeline_l124_95;
-  reg                 execute_to_memory_RCP_SIGN;
+  reg        [33:0]   execute_to_memory_FX_MUL_HH;
   wire                when_Pipeline_l124_96;
-  reg                 execute_to_memory_RCP_ZERO;
+  reg        [31:0]   execute_to_memory_RCP_Y1;
   wire                when_Pipeline_l124_97;
+  reg        [4:0]    execute_to_memory_RCP_SHIFT;
+  wire                when_Pipeline_l124_98;
+  reg                 execute_to_memory_RCP_SIGN;
+  wire                when_Pipeline_l124_99;
+  reg                 execute_to_memory_RCP_ZERO;
+  wire                when_Pipeline_l124_100;
   reg        [51:0]   memory_to_writeBack_MUL_LOW;
   wire                when_Pipeline_l151;
   wire                when_Pipeline_l154;
@@ -1925,7 +2008,10 @@ module VexRiscv (
   assign _zz_memory_MUL_LOW_4 = {{2{_zz_memory_MUL_LOW_5[49]}}, _zz_memory_MUL_LOW_5};
   assign _zz_memory_MUL_LOW_7 = ({16'd0,memory_MUL_HL} <<< 5'd16);
   assign _zz_memory_MUL_LOW_6 = {{2{_zz_memory_MUL_LOW_7[49]}}, _zz_memory_MUL_LOW_7};
-  assign _zz_execute_FX_PRODUCT = execute_FixedPointMacPlugin_product[47 : 16];
+  assign _zz_execute_FX_MUL_HH = ($signed(execute_FixedPointMacPlugin_aHigh) * $signed(execute_FixedPointMacPlugin_bHigh));
+  assign _zz_execute_FX_MUL_HL = ($signed(execute_FixedPointMacPlugin_aHigh) * $signed(execute_FixedPointMacPlugin_bSLow));
+  assign _zz_execute_FX_MUL_LH = ($signed(execute_FixedPointMacPlugin_aSLow) * $signed(execute_FixedPointMacPlugin_bHigh));
+  assign _zz_execute_FX_MUL_LL = (execute_FixedPointMacPlugin_aULow * execute_FixedPointMacPlugin_bULow);
   assign _zz_execute_SHIFT_RIGHT_1 = ($signed(_zz_execute_SHIFT_RIGHT_2) >>> execute_FullBarrelShifterPlugin_amplitude);
   assign _zz_execute_SHIFT_RIGHT = _zz_execute_SHIFT_RIGHT_1[31 : 0];
   assign _zz_execute_SHIFT_RIGHT_2 = {((execute_SHIFT_CTRL == ShiftCtrlEnum_SRA_1) && execute_FullBarrelShifterPlugin_reversed[31]),execute_FullBarrelShifterPlugin_reversed};
@@ -1996,18 +2082,32 @@ module VexRiscv (
   assign _zz_FpuPlugin_pendings_4 = {5'd0, _zz_FpuPlugin_pendings_5};
   assign _zz_FpuPlugin_pendings_7 = FpuPlugin_port_rsp_fire;
   assign _zz_FpuPlugin_pendings_6 = {5'd0, _zz_FpuPlugin_pendings_7};
-  assign _zz_execute_FixedPointMacPlugin_absVal = (- execute_FixedPointMacPlugin_rs1);
+  assign _zz_execute_FixedPointMacPlugin_aULow = execute_FixedPointMacPlugin_a[15 : 0];
+  assign _zz_execute_FixedPointMacPlugin_bULow = execute_FixedPointMacPlugin_b[15 : 0];
+  assign _zz_execute_FixedPointMacPlugin_aHigh = execute_FixedPointMacPlugin_a[31 : 16];
+  assign _zz_execute_FixedPointMacPlugin_bHigh = execute_FixedPointMacPlugin_b[31 : 16];
+  assign _zz_execute_FixedPointMacPlugin_absVal = (- execute_FixedPointMacPlugin_a);
+  assign _zz__zz_decode_RS2 = (($signed(_zz_decode_RS2_5) < $signed(32'h0)) ? 32'h0 : _zz__zz_decode_RS2_1);
+  assign _zz__zz_decode_RS2_1 = (($signed(_zz_decode_RS2_6) < $signed(_zz_decode_RS2_5)) ? _zz_decode_RS2_6 : _zz_decode_RS2_5);
+  assign _zz_memory_FixedPointMacPlugin_fxSum = ($signed(_zz_memory_FixedPointMacPlugin_fxSum_1) + $signed(_zz_memory_FixedPointMacPlugin_fxSum_5));
+  assign _zz_memory_FixedPointMacPlugin_fxSum_1 = ($signed(_zz_memory_FixedPointMacPlugin_fxSum_2) + $signed(_zz_memory_FixedPointMacPlugin_fxSum_4));
+  assign _zz_memory_FixedPointMacPlugin_fxSum_3 = {1'b0,memory_FixedPointMacPlugin_ll[31 : 16]};
+  assign _zz_memory_FixedPointMacPlugin_fxSum_2 = {{31{_zz_memory_FixedPointMacPlugin_fxSum_3[16]}}, _zz_memory_FixedPointMacPlugin_fxSum_3};
+  assign _zz_memory_FixedPointMacPlugin_fxSum_4 = {{14{memory_FixedPointMacPlugin_lh[33]}}, memory_FixedPointMacPlugin_lh};
+  assign _zz_memory_FixedPointMacPlugin_fxSum_5 = {{14{memory_FixedPointMacPlugin_hl[33]}}, memory_FixedPointMacPlugin_hl};
+  assign _zz_memory_FixedPointMacPlugin_fxSum_7 = (_zz_memory_FixedPointMacPlugin_fxSum_8 <<< 16);
+  assign _zz_memory_FixedPointMacPlugin_fxSum_6 = {{16{_zz_memory_FixedPointMacPlugin_fxSum_7[31]}}, _zz_memory_FixedPointMacPlugin_fxSum_7};
+  assign _zz_memory_FixedPointMacPlugin_fxSum_8 = memory_FixedPointMacPlugin_hh[31:0];
   assign _zz__zz_decode_RS2_4 = {{16{memory_FixedPointMacPlugin_fxProduct[31]}}, memory_FixedPointMacPlugin_fxProduct};
-  assign _zz__zz_decode_RS2_1 = _zz_decode_RS2_4[31 : 0];
-  assign _zz__zz_decode_RS2_5 = ((~ memory_RCP_XY) + 32'h00000001);
-  assign _zz__zz_decode_RS2_6 = (_zz_decode_RS2_5 <<< 1'b1);
-  assign _zz__zz_decode_RS2_6_1 = (_zz_decode_RS2_5 >>> _zz__zz_decode_RS2_6_2);
-  assign _zz__zz_decode_RS2_6_2 = (5'h1e - memory_RCP_SHIFT);
-  assign _zz__zz_decode_RS2_1_1 = (memory_RCP_ZERO ? 32'h7fffffff : _zz__zz_decode_RS2_1_2);
-  assign _zz__zz_decode_RS2_1_2 = (memory_RCP_SIGN ? _zz__zz_decode_RS2_1_3 : _zz__zz_decode_RS2_1_5);
-  assign _zz__zz_decode_RS2_1_3 = (- _zz__zz_decode_RS2_1_4);
-  assign _zz__zz_decode_RS2_1_4 = _zz_decode_RS2_7;
-  assign _zz__zz_decode_RS2_1_5 = _zz_decode_RS2_7;
+  assign _zz__zz_decode_RS2_1_1 = _zz_decode_RS2_4[31 : 0];
+  assign _zz__zz_decode_RS2_7 = (memory_RCP_Y1 <<< 1'b1);
+  assign _zz__zz_decode_RS2_7_1 = (memory_RCP_Y1 >>> _zz__zz_decode_RS2_7_2);
+  assign _zz__zz_decode_RS2_7_2 = (5'h1e - memory_RCP_SHIFT);
+  assign _zz__zz_decode_RS2_1_2 = (memory_RCP_ZERO ? 32'h7fffffff : _zz__zz_decode_RS2_1_3);
+  assign _zz__zz_decode_RS2_1_3 = (memory_RCP_SIGN ? _zz__zz_decode_RS2_1_4 : _zz__zz_decode_RS2_1_6);
+  assign _zz__zz_decode_RS2_1_4 = (- _zz__zz_decode_RS2_1_5);
+  assign _zz__zz_decode_RS2_1_5 = _zz_decode_RS2_8;
+  assign _zz__zz_decode_RS2_1_6 = _zz_decode_RS2_8;
   assign _zz_iBusWishbone_ADR_1 = (iBus_cmd_payload_address >>> 3'd5);
   assign _zz__zz_3_port = _zz__zz_3_port_1;
   assign _zz_decode_RegFilePlugin_rs1Data = 1'b1;
@@ -2037,8 +2137,13 @@ module VexRiscv (
   assign _zz_decode_LEGAL_INSTRUCTION_19 = (decode_INSTRUCTION & 32'hfe00407f);
   assign _zz_decode_LEGAL_INSTRUCTION_20 = 32'h0000000b;
   assign _zz_decode_LEGAL_INSTRUCTION_21 = ((decode_INSTRUCTION & 32'hbe00707f) == 32'h00000033);
-  assign _zz_decode_LEGAL_INSTRUCTION_22 = ((decode_INSTRUCTION & 32'hefe0007f) == 32'hc0000053);
-  assign _zz_decode_LEGAL_INSTRUCTION_23 = {((decode_INSTRUCTION & 32'hfff0007f) == 32'h58000053),{((decode_INSTRUCTION & 32'heff0707f) == 32'he0000053),{((decode_INSTRUCTION & 32'hfff0607f) == 32'he0000053),((decode_INSTRUCTION & 32'hdfffffff) == 32'h10200073)}}};
+  assign _zz_decode_LEGAL_INSTRUCTION_22 = ((decode_INSTRUCTION & 32'hfe00307f) == 32'h0000000b);
+  assign _zz_decode_LEGAL_INSTRUCTION_23 = {((decode_INSTRUCTION & 32'hefe0007f) == 32'hc0000053),{((decode_INSTRUCTION & 32'hfff0007f) == 32'h58000053),{((decode_INSTRUCTION & _zz_decode_LEGAL_INSTRUCTION_24) == 32'he0000053),{(_zz_decode_LEGAL_INSTRUCTION_25 == _zz_decode_LEGAL_INSTRUCTION_26),(_zz_decode_LEGAL_INSTRUCTION_27 == _zz_decode_LEGAL_INSTRUCTION_28)}}}};
+  assign _zz_decode_LEGAL_INSTRUCTION_24 = 32'heff0707f;
+  assign _zz_decode_LEGAL_INSTRUCTION_25 = (decode_INSTRUCTION & 32'hfff0607f);
+  assign _zz_decode_LEGAL_INSTRUCTION_26 = 32'he0000053;
+  assign _zz_decode_LEGAL_INSTRUCTION_27 = (decode_INSTRUCTION & 32'hdfffffff);
+  assign _zz_decode_LEGAL_INSTRUCTION_28 = 32'h10200073;
   assign _zz_IBusCachedPlugin_decompressor_decompressed_27 = {_zz_IBusCachedPlugin_decompressor_decompressed_12,_zz_IBusCachedPlugin_decompressor_decompressed[4 : 3]};
   assign _zz_IBusCachedPlugin_decompressor_decompressed_28 = _zz_IBusCachedPlugin_decompressor_decompressed[5];
   assign _zz_IBusCachedPlugin_decompressor_decompressed_29 = _zz_IBusCachedPlugin_decompressor_decompressed[2];
@@ -2053,228 +2158,246 @@ module VexRiscv (
   assign _zz_IBusCachedPlugin_predictionJumpInterface_payload_6 = decode_INSTRUCTION[20];
   assign _zz_IBusCachedPlugin_predictionJumpInterface_payload_7 = decode_INSTRUCTION[31];
   assign _zz_IBusCachedPlugin_predictionJumpInterface_payload_8 = decode_INSTRUCTION[7];
-  assign _zz__zz_decode_IS_FXRCP = 32'h00003048;
-  assign _zz__zz_decode_IS_FXRCP_1 = (decode_INSTRUCTION & 32'h0000304c);
-  assign _zz__zz_decode_IS_FXRCP_2 = 32'h00001008;
-  assign _zz__zz_decode_IS_FXRCP_3 = ((decode_INSTRUCTION & 32'h0000304c) == 32'h00000008);
-  assign _zz__zz_decode_IS_FXRCP_4 = {_zz_decode_IS_FXRCP_8,((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_5) == 32'h20002010)};
-  assign _zz__zz_decode_IS_FXRCP_6 = (|{_zz_decode_IS_FXRCP_3,{_zz__zz_decode_IS_FXRCP_7,{_zz__zz_decode_IS_FXRCP_8,_zz__zz_decode_IS_FXRCP_10}}});
-  assign _zz__zz_decode_IS_FXRCP_12 = 1'b0;
-  assign _zz__zz_decode_IS_FXRCP_13 = {(|{_zz__zz_decode_IS_FXRCP_14,_zz__zz_decode_IS_FXRCP_16}),{(|_zz__zz_decode_IS_FXRCP_21),{_zz__zz_decode_IS_FXRCP_26,{_zz__zz_decode_IS_FXRCP_37,_zz__zz_decode_IS_FXRCP_50}}}};
-  assign _zz__zz_decode_IS_FXRCP_5 = 32'h20002010;
-  assign _zz__zz_decode_IS_FXRCP_7 = ((decode_INSTRUCTION & 32'h20001010) == 32'h20001010);
-  assign _zz__zz_decode_IS_FXRCP_8 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_9) == 32'h08000010);
-  assign _zz__zz_decode_IS_FXRCP_10 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_11) == 32'h80000010);
-  assign _zz__zz_decode_IS_FXRCP_14 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_15) == 32'h60000010);
-  assign _zz__zz_decode_IS_FXRCP_16 = {(_zz__zz_decode_IS_FXRCP_17 == _zz__zz_decode_IS_FXRCP_18),(_zz__zz_decode_IS_FXRCP_19 == _zz__zz_decode_IS_FXRCP_20)};
-  assign _zz__zz_decode_IS_FXRCP_21 = {(_zz__zz_decode_IS_FXRCP_22 == _zz__zz_decode_IS_FXRCP_23),(_zz__zz_decode_IS_FXRCP_24 == _zz__zz_decode_IS_FXRCP_25)};
-  assign _zz__zz_decode_IS_FXRCP_26 = (|{_zz__zz_decode_IS_FXRCP_27,{_zz__zz_decode_IS_FXRCP_29,_zz__zz_decode_IS_FXRCP_32}});
-  assign _zz__zz_decode_IS_FXRCP_37 = (|{_zz__zz_decode_IS_FXRCP_38,_zz__zz_decode_IS_FXRCP_39});
-  assign _zz__zz_decode_IS_FXRCP_50 = {(|_zz__zz_decode_IS_FXRCP_51),{_zz__zz_decode_IS_FXRCP_52,{_zz__zz_decode_IS_FXRCP_61,_zz__zz_decode_IS_FXRCP_67}}};
-  assign _zz__zz_decode_IS_FXRCP_9 = 32'h28000010;
-  assign _zz__zz_decode_IS_FXRCP_11 = 32'ha0100010;
-  assign _zz__zz_decode_IS_FXRCP_15 = 32'h60000010;
-  assign _zz__zz_decode_IS_FXRCP_17 = (decode_INSTRUCTION & 32'h18000010);
-  assign _zz__zz_decode_IS_FXRCP_18 = 32'h18000010;
-  assign _zz__zz_decode_IS_FXRCP_19 = (decode_INSTRUCTION & 32'ha0000010);
-  assign _zz__zz_decode_IS_FXRCP_20 = 32'h20000010;
-  assign _zz__zz_decode_IS_FXRCP_22 = (decode_INSTRUCTION & 32'h80000004);
-  assign _zz__zz_decode_IS_FXRCP_23 = 32'h80000000;
-  assign _zz__zz_decode_IS_FXRCP_24 = (decode_INSTRUCTION & 32'h00000050);
-  assign _zz__zz_decode_IS_FXRCP_25 = 32'h00000040;
-  assign _zz__zz_decode_IS_FXRCP_27 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_28) == 32'h00001010);
-  assign _zz__zz_decode_IS_FXRCP_29 = (_zz__zz_decode_IS_FXRCP_30 == _zz__zz_decode_IS_FXRCP_31);
-  assign _zz__zz_decode_IS_FXRCP_32 = {_zz__zz_decode_IS_FXRCP_33,_zz__zz_decode_IS_FXRCP_35};
-  assign _zz__zz_decode_IS_FXRCP_38 = _zz_decode_IS_FXRCP_9;
-  assign _zz__zz_decode_IS_FXRCP_39 = {_zz__zz_decode_IS_FXRCP_40,{_zz__zz_decode_IS_FXRCP_42,_zz__zz_decode_IS_FXRCP_45}};
-  assign _zz__zz_decode_IS_FXRCP_51 = {_zz_decode_IS_FXRCP_9,_zz_decode_IS_FXRCP_6};
-  assign _zz__zz_decode_IS_FXRCP_52 = (|{_zz__zz_decode_IS_FXRCP_53,_zz__zz_decode_IS_FXRCP_56});
-  assign _zz__zz_decode_IS_FXRCP_61 = (|_zz__zz_decode_IS_FXRCP_62);
-  assign _zz__zz_decode_IS_FXRCP_67 = {_zz__zz_decode_IS_FXRCP_68,{_zz__zz_decode_IS_FXRCP_71,_zz__zz_decode_IS_FXRCP_75}};
-  assign _zz__zz_decode_IS_FXRCP_28 = 32'h10001010;
-  assign _zz__zz_decode_IS_FXRCP_30 = (decode_INSTRUCTION & 32'h30000010);
-  assign _zz__zz_decode_IS_FXRCP_31 = 32'h00000010;
-  assign _zz__zz_decode_IS_FXRCP_33 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_34) == 32'h00000010);
-  assign _zz__zz_decode_IS_FXRCP_35 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_36) == 32'h00000010);
-  assign _zz__zz_decode_IS_FXRCP_40 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_41) == 32'h90000010);
-  assign _zz__zz_decode_IS_FXRCP_42 = (_zz__zz_decode_IS_FXRCP_43 == _zz__zz_decode_IS_FXRCP_44);
-  assign _zz__zz_decode_IS_FXRCP_45 = {_zz__zz_decode_IS_FXRCP_46,_zz__zz_decode_IS_FXRCP_48};
-  assign _zz__zz_decode_IS_FXRCP_53 = (_zz__zz_decode_IS_FXRCP_54 == _zz__zz_decode_IS_FXRCP_55);
-  assign _zz__zz_decode_IS_FXRCP_56 = {_zz__zz_decode_IS_FXRCP_57,_zz__zz_decode_IS_FXRCP_59};
-  assign _zz__zz_decode_IS_FXRCP_62 = {_zz__zz_decode_IS_FXRCP_63,_zz__zz_decode_IS_FXRCP_65};
-  assign _zz__zz_decode_IS_FXRCP_68 = (|_zz__zz_decode_IS_FXRCP_69);
-  assign _zz__zz_decode_IS_FXRCP_71 = (|_zz__zz_decode_IS_FXRCP_72);
-  assign _zz__zz_decode_IS_FXRCP_75 = {_zz__zz_decode_IS_FXRCP_76,{_zz__zz_decode_IS_FXRCP_79,_zz__zz_decode_IS_FXRCP_81}};
-  assign _zz__zz_decode_IS_FXRCP_34 = 32'h88000010;
-  assign _zz__zz_decode_IS_FXRCP_36 = 32'h50000010;
-  assign _zz__zz_decode_IS_FXRCP_41 = 32'h90000010;
-  assign _zz__zz_decode_IS_FXRCP_43 = (decode_INSTRUCTION & 32'hc0000010);
-  assign _zz__zz_decode_IS_FXRCP_44 = 32'h40000010;
-  assign _zz__zz_decode_IS_FXRCP_46 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_47) == 32'h00000010);
-  assign _zz__zz_decode_IS_FXRCP_48 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_49) == 32'h00000010);
-  assign _zz__zz_decode_IS_FXRCP_54 = (decode_INSTRUCTION & 32'h10000020);
-  assign _zz__zz_decode_IS_FXRCP_55 = 32'h10000000;
-  assign _zz__zz_decode_IS_FXRCP_57 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_58) == 32'h0);
-  assign _zz__zz_decode_IS_FXRCP_59 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_60) == 32'h0);
-  assign _zz__zz_decode_IS_FXRCP_63 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_64) == 32'h00000040);
-  assign _zz__zz_decode_IS_FXRCP_65 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_66) == 32'h00000004);
-  assign _zz__zz_decode_IS_FXRCP_69 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_70) == 32'h10000030);
-  assign _zz__zz_decode_IS_FXRCP_72 = {_zz__zz_decode_IS_FXRCP_73,_zz__zz_decode_IS_FXRCP_74};
-  assign _zz__zz_decode_IS_FXRCP_76 = (|{_zz__zz_decode_IS_FXRCP_77,_zz__zz_decode_IS_FXRCP_78});
-  assign _zz__zz_decode_IS_FXRCP_79 = (|_zz__zz_decode_IS_FXRCP_80);
-  assign _zz__zz_decode_IS_FXRCP_81 = {_zz__zz_decode_IS_FXRCP_82,{_zz__zz_decode_IS_FXRCP_83,_zz__zz_decode_IS_FXRCP_84}};
-  assign _zz__zz_decode_IS_FXRCP_47 = 32'h58000010;
-  assign _zz__zz_decode_IS_FXRCP_49 = 32'hb0000010;
-  assign _zz__zz_decode_IS_FXRCP_58 = 32'h80000020;
-  assign _zz__zz_decode_IS_FXRCP_60 = 32'h00000030;
-  assign _zz__zz_decode_IS_FXRCP_64 = 32'h00000060;
-  assign _zz__zz_decode_IS_FXRCP_66 = 32'h0000005c;
-  assign _zz__zz_decode_IS_FXRCP_70 = 32'h10003034;
-  assign _zz__zz_decode_IS_FXRCP_73 = ((decode_INSTRUCTION & 32'h00001070) == 32'h00001070);
-  assign _zz__zz_decode_IS_FXRCP_74 = ((decode_INSTRUCTION & 32'h00002070) == 32'h00002070);
-  assign _zz__zz_decode_IS_FXRCP_77 = _zz_decode_IS_FXRCP_7;
-  assign _zz__zz_decode_IS_FXRCP_78 = ((decode_INSTRUCTION & 32'h00002034) == 32'h00000024);
-  assign _zz__zz_decode_IS_FXRCP_80 = ((decode_INSTRUCTION & 32'h00000078) == 32'h00000060);
-  assign _zz__zz_decode_IS_FXRCP_82 = (|_zz_decode_IS_FXRCP_10);
-  assign _zz__zz_decode_IS_FXRCP_83 = (|_zz_decode_IS_FXRCP_10);
-  assign _zz__zz_decode_IS_FXRCP_84 = {(|_zz__zz_decode_IS_FXRCP_85),{(|_zz__zz_decode_IS_FXRCP_86),{_zz__zz_decode_IS_FXRCP_87,{_zz__zz_decode_IS_FXRCP_89,_zz__zz_decode_IS_FXRCP_92}}}};
-  assign _zz__zz_decode_IS_FXRCP_85 = ((decode_INSTRUCTION & 32'h02004064) == 32'h02004020);
-  assign _zz__zz_decode_IS_FXRCP_86 = ((decode_INSTRUCTION & 32'h02004074) == 32'h02000030);
-  assign _zz__zz_decode_IS_FXRCP_87 = (|((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_88) == 32'h00005010));
-  assign _zz__zz_decode_IS_FXRCP_89 = (|{_zz__zz_decode_IS_FXRCP_90,_zz__zz_decode_IS_FXRCP_91});
-  assign _zz__zz_decode_IS_FXRCP_92 = {(|_zz__zz_decode_IS_FXRCP_93),{(|_zz__zz_decode_IS_FXRCP_94),{_zz__zz_decode_IS_FXRCP_95,{_zz__zz_decode_IS_FXRCP_97,_zz__zz_decode_IS_FXRCP_100}}}};
-  assign _zz__zz_decode_IS_FXRCP_88 = 32'h02007054;
-  assign _zz__zz_decode_IS_FXRCP_90 = ((decode_INSTRUCTION & 32'h40003054) == 32'h40001010);
-  assign _zz__zz_decode_IS_FXRCP_91 = ((decode_INSTRUCTION & 32'h02007054) == 32'h00001010);
-  assign _zz__zz_decode_IS_FXRCP_93 = ((decode_INSTRUCTION & 32'h00000034) == 32'h00000034);
-  assign _zz__zz_decode_IS_FXRCP_94 = ((decode_INSTRUCTION & 32'h00001000) == 32'h00001000);
-  assign _zz__zz_decode_IS_FXRCP_95 = (|((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_96) == 32'h00002000));
-  assign _zz__zz_decode_IS_FXRCP_97 = (|{_zz__zz_decode_IS_FXRCP_98,_zz__zz_decode_IS_FXRCP_99});
-  assign _zz__zz_decode_IS_FXRCP_100 = {(|_zz__zz_decode_IS_FXRCP_101),{(|_zz__zz_decode_IS_FXRCP_102),{_zz__zz_decode_IS_FXRCP_107,{_zz__zz_decode_IS_FXRCP_112,_zz__zz_decode_IS_FXRCP_113}}}};
-  assign _zz__zz_decode_IS_FXRCP_96 = 32'h00003000;
-  assign _zz__zz_decode_IS_FXRCP_98 = ((decode_INSTRUCTION & 32'h00002010) == 32'h00002000);
-  assign _zz__zz_decode_IS_FXRCP_99 = ((decode_INSTRUCTION & 32'h00005000) == 32'h00001000);
-  assign _zz__zz_decode_IS_FXRCP_101 = ((decode_INSTRUCTION & 32'h00004048) == 32'h00004008);
-  assign _zz__zz_decode_IS_FXRCP_102 = {(_zz__zz_decode_IS_FXRCP_103 == _zz__zz_decode_IS_FXRCP_104),{_zz__zz_decode_IS_FXRCP_105,_zz__zz_decode_IS_FXRCP_106}};
-  assign _zz__zz_decode_IS_FXRCP_107 = (|{_zz__zz_decode_IS_FXRCP_108,{_zz__zz_decode_IS_FXRCP_109,_zz__zz_decode_IS_FXRCP_110}});
-  assign _zz__zz_decode_IS_FXRCP_112 = (|_zz_decode_IS_FXRCP_9);
-  assign _zz__zz_decode_IS_FXRCP_113 = {(|_zz__zz_decode_IS_FXRCP_114),{_zz__zz_decode_IS_FXRCP_127,{_zz__zz_decode_IS_FXRCP_140,_zz__zz_decode_IS_FXRCP_163}}};
-  assign _zz__zz_decode_IS_FXRCP_103 = (decode_INSTRUCTION & 32'h00000034);
-  assign _zz__zz_decode_IS_FXRCP_104 = 32'h00000020;
-  assign _zz__zz_decode_IS_FXRCP_105 = ((decode_INSTRUCTION & 32'h00000064) == 32'h00000020);
-  assign _zz__zz_decode_IS_FXRCP_106 = ((decode_INSTRUCTION & 32'h0000204c) == 32'h00000008);
-  assign _zz__zz_decode_IS_FXRCP_108 = ((decode_INSTRUCTION & 32'h00000030) == 32'h00000020);
-  assign _zz__zz_decode_IS_FXRCP_109 = _zz_decode_IS_FXRCP_4;
-  assign _zz__zz_decode_IS_FXRCP_110 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_111) == 32'h10000020);
-  assign _zz__zz_decode_IS_FXRCP_114 = {_zz_decode_IS_FXRCP_3,{_zz_decode_IS_FXRCP_8,{_zz__zz_decode_IS_FXRCP_115,_zz__zz_decode_IS_FXRCP_118}}};
-  assign _zz__zz_decode_IS_FXRCP_127 = (|{_zz_decode_IS_FXRCP_8,{_zz__zz_decode_IS_FXRCP_128,_zz__zz_decode_IS_FXRCP_131}});
-  assign _zz__zz_decode_IS_FXRCP_140 = (|{_zz__zz_decode_IS_FXRCP_141,_zz__zz_decode_IS_FXRCP_142});
-  assign _zz__zz_decode_IS_FXRCP_163 = {(|_zz__zz_decode_IS_FXRCP_164),{_zz__zz_decode_IS_FXRCP_169,{_zz__zz_decode_IS_FXRCP_174,_zz__zz_decode_IS_FXRCP_178}}};
-  assign _zz__zz_decode_IS_FXRCP_111 = 32'h10003024;
-  assign _zz__zz_decode_IS_FXRCP_115 = (_zz__zz_decode_IS_FXRCP_116 == _zz__zz_decode_IS_FXRCP_117);
-  assign _zz__zz_decode_IS_FXRCP_118 = {_zz__zz_decode_IS_FXRCP_119,{_zz__zz_decode_IS_FXRCP_121,_zz__zz_decode_IS_FXRCP_124}};
-  assign _zz__zz_decode_IS_FXRCP_128 = (_zz__zz_decode_IS_FXRCP_129 == _zz__zz_decode_IS_FXRCP_130);
-  assign _zz__zz_decode_IS_FXRCP_131 = {_zz__zz_decode_IS_FXRCP_132,{_zz__zz_decode_IS_FXRCP_134,_zz__zz_decode_IS_FXRCP_137}};
-  assign _zz__zz_decode_IS_FXRCP_141 = _zz_decode_IS_FXRCP_7;
-  assign _zz__zz_decode_IS_FXRCP_142 = {_zz__zz_decode_IS_FXRCP_143,{_zz__zz_decode_IS_FXRCP_145,_zz__zz_decode_IS_FXRCP_148}};
-  assign _zz__zz_decode_IS_FXRCP_164 = {_zz_decode_IS_FXRCP_3,{_zz__zz_decode_IS_FXRCP_165,_zz__zz_decode_IS_FXRCP_166}};
-  assign _zz__zz_decode_IS_FXRCP_169 = (|{_zz__zz_decode_IS_FXRCP_170,_zz__zz_decode_IS_FXRCP_171});
-  assign _zz__zz_decode_IS_FXRCP_174 = (|_zz__zz_decode_IS_FXRCP_175);
-  assign _zz__zz_decode_IS_FXRCP_178 = {_zz__zz_decode_IS_FXRCP_179,{_zz__zz_decode_IS_FXRCP_182,_zz__zz_decode_IS_FXRCP_199}};
-  assign _zz__zz_decode_IS_FXRCP_116 = (decode_INSTRUCTION & 32'h00004020);
-  assign _zz__zz_decode_IS_FXRCP_117 = 32'h00004020;
-  assign _zz__zz_decode_IS_FXRCP_119 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_120) == 32'h00000060);
-  assign _zz__zz_decode_IS_FXRCP_121 = (_zz__zz_decode_IS_FXRCP_122 == _zz__zz_decode_IS_FXRCP_123);
-  assign _zz__zz_decode_IS_FXRCP_124 = (_zz__zz_decode_IS_FXRCP_125 == _zz__zz_decode_IS_FXRCP_126);
-  assign _zz__zz_decode_IS_FXRCP_129 = (decode_INSTRUCTION & 32'h00002070);
-  assign _zz__zz_decode_IS_FXRCP_130 = 32'h00002010;
-  assign _zz__zz_decode_IS_FXRCP_132 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_133) == 32'h00002020);
-  assign _zz__zz_decode_IS_FXRCP_134 = (_zz__zz_decode_IS_FXRCP_135 == _zz__zz_decode_IS_FXRCP_136);
-  assign _zz__zz_decode_IS_FXRCP_137 = (_zz__zz_decode_IS_FXRCP_138 == _zz__zz_decode_IS_FXRCP_139);
-  assign _zz__zz_decode_IS_FXRCP_143 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_144) == 32'h00000010);
-  assign _zz__zz_decode_IS_FXRCP_145 = (_zz__zz_decode_IS_FXRCP_146 == _zz__zz_decode_IS_FXRCP_147);
-  assign _zz__zz_decode_IS_FXRCP_148 = {_zz__zz_decode_IS_FXRCP_149,{_zz__zz_decode_IS_FXRCP_151,_zz__zz_decode_IS_FXRCP_152}};
-  assign _zz__zz_decode_IS_FXRCP_165 = _zz_decode_IS_FXRCP_2;
-  assign _zz__zz_decode_IS_FXRCP_166 = {_zz_decode_IS_FXRCP_5,_zz__zz_decode_IS_FXRCP_167};
-  assign _zz__zz_decode_IS_FXRCP_170 = _zz_decode_IS_FXRCP_3;
-  assign _zz__zz_decode_IS_FXRCP_171 = {_zz__zz_decode_IS_FXRCP_172,_zz_decode_IS_FXRCP_5};
-  assign _zz__zz_decode_IS_FXRCP_175 = (_zz__zz_decode_IS_FXRCP_176 == _zz__zz_decode_IS_FXRCP_177);
-  assign _zz__zz_decode_IS_FXRCP_179 = (|_zz__zz_decode_IS_FXRCP_180);
-  assign _zz__zz_decode_IS_FXRCP_182 = (|_zz__zz_decode_IS_FXRCP_183);
-  assign _zz__zz_decode_IS_FXRCP_199 = {_zz__zz_decode_IS_FXRCP_200,{_zz__zz_decode_IS_FXRCP_201,_zz__zz_decode_IS_FXRCP_211}};
-  assign _zz__zz_decode_IS_FXRCP_120 = 32'h00000060;
-  assign _zz__zz_decode_IS_FXRCP_122 = (decode_INSTRUCTION & 32'h02000020);
-  assign _zz__zz_decode_IS_FXRCP_123 = 32'h00000020;
-  assign _zz__zz_decode_IS_FXRCP_125 = (decode_INSTRUCTION & 32'h00000070);
-  assign _zz__zz_decode_IS_FXRCP_126 = 32'h00000010;
-  assign _zz__zz_decode_IS_FXRCP_133 = 32'h02002060;
-  assign _zz__zz_decode_IS_FXRCP_135 = (decode_INSTRUCTION & 32'h00001070);
-  assign _zz__zz_decode_IS_FXRCP_136 = 32'h00000010;
-  assign _zz__zz_decode_IS_FXRCP_138 = (decode_INSTRUCTION & 32'h02003020);
-  assign _zz__zz_decode_IS_FXRCP_139 = 32'h00000020;
-  assign _zz__zz_decode_IS_FXRCP_144 = 32'h00000050;
-  assign _zz__zz_decode_IS_FXRCP_146 = (decode_INSTRUCTION & 32'h00001030);
-  assign _zz__zz_decode_IS_FXRCP_147 = 32'h00001030;
-  assign _zz__zz_decode_IS_FXRCP_149 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_150) == 32'h00002030);
-  assign _zz__zz_decode_IS_FXRCP_151 = _zz_decode_IS_FXRCP_6;
-  assign _zz__zz_decode_IS_FXRCP_152 = {_zz__zz_decode_IS_FXRCP_153,{_zz__zz_decode_IS_FXRCP_155,_zz__zz_decode_IS_FXRCP_158}};
-  assign _zz__zz_decode_IS_FXRCP_167 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_168) == 32'h00000020);
-  assign _zz__zz_decode_IS_FXRCP_172 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_173) == 32'h0);
-  assign _zz__zz_decode_IS_FXRCP_176 = (decode_INSTRUCTION & 32'h00004014);
-  assign _zz__zz_decode_IS_FXRCP_177 = 32'h00004010;
-  assign _zz__zz_decode_IS_FXRCP_180 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_181) == 32'h00002010);
-  assign _zz__zz_decode_IS_FXRCP_183 = {_zz__zz_decode_IS_FXRCP_184,{_zz__zz_decode_IS_FXRCP_186,_zz__zz_decode_IS_FXRCP_189}};
-  assign _zz__zz_decode_IS_FXRCP_200 = (|_zz_decode_IS_FXRCP_4);
-  assign _zz__zz_decode_IS_FXRCP_201 = (|_zz__zz_decode_IS_FXRCP_202);
-  assign _zz__zz_decode_IS_FXRCP_211 = {_zz__zz_decode_IS_FXRCP_212,{_zz__zz_decode_IS_FXRCP_216,_zz__zz_decode_IS_FXRCP_218}};
-  assign _zz__zz_decode_IS_FXRCP_150 = 32'h00002030;
-  assign _zz__zz_decode_IS_FXRCP_153 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_154) == 32'h00000024);
-  assign _zz__zz_decode_IS_FXRCP_155 = (_zz__zz_decode_IS_FXRCP_156 == _zz__zz_decode_IS_FXRCP_157);
-  assign _zz__zz_decode_IS_FXRCP_158 = {_zz__zz_decode_IS_FXRCP_159,_zz__zz_decode_IS_FXRCP_161};
-  assign _zz__zz_decode_IS_FXRCP_168 = 32'h00000070;
-  assign _zz__zz_decode_IS_FXRCP_173 = 32'h00000020;
-  assign _zz__zz_decode_IS_FXRCP_181 = 32'h00006014;
-  assign _zz__zz_decode_IS_FXRCP_184 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_185) == 32'h00000020);
-  assign _zz__zz_decode_IS_FXRCP_186 = (_zz__zz_decode_IS_FXRCP_187 == _zz__zz_decode_IS_FXRCP_188);
-  assign _zz__zz_decode_IS_FXRCP_189 = {_zz__zz_decode_IS_FXRCP_190,{_zz__zz_decode_IS_FXRCP_192,_zz__zz_decode_IS_FXRCP_195}};
-  assign _zz__zz_decode_IS_FXRCP_202 = {_zz__zz_decode_IS_FXRCP_203,{_zz__zz_decode_IS_FXRCP_205,_zz__zz_decode_IS_FXRCP_208}};
-  assign _zz__zz_decode_IS_FXRCP_212 = (|{_zz__zz_decode_IS_FXRCP_213,_zz__zz_decode_IS_FXRCP_214});
-  assign _zz__zz_decode_IS_FXRCP_216 = (|_zz__zz_decode_IS_FXRCP_217);
-  assign _zz__zz_decode_IS_FXRCP_218 = (|_zz__zz_decode_IS_FXRCP_219);
-  assign _zz__zz_decode_IS_FXRCP_154 = 32'h00002024;
-  assign _zz__zz_decode_IS_FXRCP_156 = (decode_INSTRUCTION & 32'h00002064);
-  assign _zz__zz_decode_IS_FXRCP_157 = 32'h00002000;
-  assign _zz__zz_decode_IS_FXRCP_159 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_160) == 32'h0);
-  assign _zz__zz_decode_IS_FXRCP_161 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_162) == 32'h0);
-  assign _zz__zz_decode_IS_FXRCP_185 = 32'h00000038;
-  assign _zz__zz_decode_IS_FXRCP_187 = (decode_INSTRUCTION & 32'h00001044);
-  assign _zz__zz_decode_IS_FXRCP_188 = 32'h00001000;
-  assign _zz__zz_decode_IS_FXRCP_190 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_191) == 32'h00004000);
-  assign _zz__zz_decode_IS_FXRCP_192 = (_zz__zz_decode_IS_FXRCP_193 == _zz__zz_decode_IS_FXRCP_194);
-  assign _zz__zz_decode_IS_FXRCP_195 = {_zz__zz_decode_IS_FXRCP_196,{_zz__zz_decode_IS_FXRCP_197,_zz__zz_decode_IS_FXRCP_198}};
-  assign _zz__zz_decode_IS_FXRCP_203 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP_204) == 32'h00000040);
-  assign _zz__zz_decode_IS_FXRCP_205 = (_zz__zz_decode_IS_FXRCP_206 == _zz__zz_decode_IS_FXRCP_207);
-  assign _zz__zz_decode_IS_FXRCP_208 = (_zz__zz_decode_IS_FXRCP_209 == _zz__zz_decode_IS_FXRCP_210);
-  assign _zz__zz_decode_IS_FXRCP_213 = _zz_decode_IS_FXRCP_3;
-  assign _zz__zz_decode_IS_FXRCP_214 = {_zz_decode_IS_FXRCP_1,_zz__zz_decode_IS_FXRCP_215};
-  assign _zz__zz_decode_IS_FXRCP_217 = {_zz_decode_IS_FXRCP_2,_zz_decode_IS_FXRCP_1};
-  assign _zz__zz_decode_IS_FXRCP_219 = (_zz__zz_decode_IS_FXRCP_220 == _zz__zz_decode_IS_FXRCP_221);
-  assign _zz__zz_decode_IS_FXRCP_160 = 32'h0000006c;
-  assign _zz__zz_decode_IS_FXRCP_162 = 32'h00001064;
-  assign _zz__zz_decode_IS_FXRCP_191 = 32'h00004050;
-  assign _zz__zz_decode_IS_FXRCP_193 = (decode_INSTRUCTION & 32'h0000004c);
-  assign _zz__zz_decode_IS_FXRCP_194 = 32'h0;
-  assign _zz__zz_decode_IS_FXRCP_196 = ((decode_INSTRUCTION & 32'h00002044) == 32'h0);
-  assign _zz__zz_decode_IS_FXRCP_197 = _zz_decode_IS_FXRCP_4;
-  assign _zz__zz_decode_IS_FXRCP_198 = {((decode_INSTRUCTION & 32'h00006024) == 32'h00002020),{((decode_INSTRUCTION & 32'h00005024) == 32'h00001020),((decode_INSTRUCTION & 32'h90000034) == 32'h90000010)}};
-  assign _zz__zz_decode_IS_FXRCP_204 = 32'h00000044;
-  assign _zz__zz_decode_IS_FXRCP_206 = (decode_INSTRUCTION & 32'h00002014);
-  assign _zz__zz_decode_IS_FXRCP_207 = 32'h00002010;
-  assign _zz__zz_decode_IS_FXRCP_209 = (decode_INSTRUCTION & 32'h40000034);
-  assign _zz__zz_decode_IS_FXRCP_210 = 32'h40000030;
-  assign _zz__zz_decode_IS_FXRCP_215 = ((decode_INSTRUCTION & 32'h00002014) == 32'h00000004);
-  assign _zz__zz_decode_IS_FXRCP_220 = (decode_INSTRUCTION & 32'h00005054);
-  assign _zz__zz_decode_IS_FXRCP_221 = 32'h00001004;
+  assign _zz__zz_decode_IS_FXCLAMP = 32'h00003050;
+  assign _zz__zz_decode_IS_FXCLAMP_1 = (decode_INSTRUCTION & 32'h00003048);
+  assign _zz__zz_decode_IS_FXCLAMP_2 = 32'h00002008;
+  assign _zz__zz_decode_IS_FXCLAMP_3 = ((decode_INSTRUCTION & 32'h0000304c) == 32'h00001008);
+  assign _zz__zz_decode_IS_FXCLAMP_4 = ((decode_INSTRUCTION & 32'h0000704c) == 32'h00000008);
+  assign _zz__zz_decode_IS_FXCLAMP_5 = (|{_zz_decode_IS_FXCLAMP_8,(_zz__zz_decode_IS_FXCLAMP_6 == _zz__zz_decode_IS_FXCLAMP_7)});
+  assign _zz__zz_decode_IS_FXCLAMP_8 = (|{_zz_decode_IS_FXCLAMP_3,{_zz__zz_decode_IS_FXCLAMP_9,_zz__zz_decode_IS_FXCLAMP_11}});
+  assign _zz__zz_decode_IS_FXCLAMP_16 = {1'b0,{(|_zz__zz_decode_IS_FXCLAMP_17),{_zz__zz_decode_IS_FXCLAMP_24,{_zz__zz_decode_IS_FXCLAMP_29,_zz__zz_decode_IS_FXCLAMP_42}}}};
+  assign _zz__zz_decode_IS_FXCLAMP_6 = (decode_INSTRUCTION & 32'h20002010);
+  assign _zz__zz_decode_IS_FXCLAMP_7 = 32'h20002010;
+  assign _zz__zz_decode_IS_FXCLAMP_9 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_10) == 32'h20001010);
+  assign _zz__zz_decode_IS_FXCLAMP_11 = {(_zz__zz_decode_IS_FXCLAMP_12 == _zz__zz_decode_IS_FXCLAMP_13),(_zz__zz_decode_IS_FXCLAMP_14 == _zz__zz_decode_IS_FXCLAMP_15)};
+  assign _zz__zz_decode_IS_FXCLAMP_17 = {(_zz__zz_decode_IS_FXCLAMP_18 == _zz__zz_decode_IS_FXCLAMP_19),{_zz__zz_decode_IS_FXCLAMP_20,_zz__zz_decode_IS_FXCLAMP_22}};
+  assign _zz__zz_decode_IS_FXCLAMP_24 = (|{_zz__zz_decode_IS_FXCLAMP_25,_zz__zz_decode_IS_FXCLAMP_27});
+  assign _zz__zz_decode_IS_FXCLAMP_29 = (|{_zz__zz_decode_IS_FXCLAMP_30,_zz__zz_decode_IS_FXCLAMP_33});
+  assign _zz__zz_decode_IS_FXCLAMP_42 = {(|_zz__zz_decode_IS_FXCLAMP_43),{_zz__zz_decode_IS_FXCLAMP_56,{_zz__zz_decode_IS_FXCLAMP_59,_zz__zz_decode_IS_FXCLAMP_69}}};
+  assign _zz__zz_decode_IS_FXCLAMP_10 = 32'h20001010;
+  assign _zz__zz_decode_IS_FXCLAMP_12 = (decode_INSTRUCTION & 32'h28000010);
+  assign _zz__zz_decode_IS_FXCLAMP_13 = 32'h08000010;
+  assign _zz__zz_decode_IS_FXCLAMP_14 = (decode_INSTRUCTION & 32'ha0100010);
+  assign _zz__zz_decode_IS_FXCLAMP_15 = 32'h80000010;
+  assign _zz__zz_decode_IS_FXCLAMP_18 = (decode_INSTRUCTION & 32'h60000010);
+  assign _zz__zz_decode_IS_FXCLAMP_19 = 32'h60000010;
+  assign _zz__zz_decode_IS_FXCLAMP_20 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_21) == 32'h18000010);
+  assign _zz__zz_decode_IS_FXCLAMP_22 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_23) == 32'h20000010);
+  assign _zz__zz_decode_IS_FXCLAMP_25 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_26) == 32'h80000000);
+  assign _zz__zz_decode_IS_FXCLAMP_27 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_28) == 32'h00000040);
+  assign _zz__zz_decode_IS_FXCLAMP_30 = (_zz__zz_decode_IS_FXCLAMP_31 == _zz__zz_decode_IS_FXCLAMP_32);
+  assign _zz__zz_decode_IS_FXCLAMP_33 = {_zz__zz_decode_IS_FXCLAMP_34,{_zz__zz_decode_IS_FXCLAMP_36,_zz__zz_decode_IS_FXCLAMP_39}};
+  assign _zz__zz_decode_IS_FXCLAMP_43 = {_zz_decode_IS_FXCLAMP_9,{_zz__zz_decode_IS_FXCLAMP_44,_zz__zz_decode_IS_FXCLAMP_47}};
+  assign _zz__zz_decode_IS_FXCLAMP_56 = (|{_zz__zz_decode_IS_FXCLAMP_57,_zz__zz_decode_IS_FXCLAMP_58});
+  assign _zz__zz_decode_IS_FXCLAMP_59 = (|_zz__zz_decode_IS_FXCLAMP_60);
+  assign _zz__zz_decode_IS_FXCLAMP_69 = {_zz__zz_decode_IS_FXCLAMP_70,{_zz__zz_decode_IS_FXCLAMP_77,_zz__zz_decode_IS_FXCLAMP_81}};
+  assign _zz__zz_decode_IS_FXCLAMP_21 = 32'h18000010;
+  assign _zz__zz_decode_IS_FXCLAMP_23 = 32'ha0000010;
+  assign _zz__zz_decode_IS_FXCLAMP_26 = 32'h80000004;
+  assign _zz__zz_decode_IS_FXCLAMP_28 = 32'h00000050;
+  assign _zz__zz_decode_IS_FXCLAMP_31 = (decode_INSTRUCTION & 32'h10001010);
+  assign _zz__zz_decode_IS_FXCLAMP_32 = 32'h00001010;
+  assign _zz__zz_decode_IS_FXCLAMP_34 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_35) == 32'h00000010);
+  assign _zz__zz_decode_IS_FXCLAMP_36 = (_zz__zz_decode_IS_FXCLAMP_37 == _zz__zz_decode_IS_FXCLAMP_38);
+  assign _zz__zz_decode_IS_FXCLAMP_39 = (_zz__zz_decode_IS_FXCLAMP_40 == _zz__zz_decode_IS_FXCLAMP_41);
+  assign _zz__zz_decode_IS_FXCLAMP_44 = (_zz__zz_decode_IS_FXCLAMP_45 == _zz__zz_decode_IS_FXCLAMP_46);
+  assign _zz__zz_decode_IS_FXCLAMP_47 = {_zz__zz_decode_IS_FXCLAMP_48,{_zz__zz_decode_IS_FXCLAMP_50,_zz__zz_decode_IS_FXCLAMP_53}};
+  assign _zz__zz_decode_IS_FXCLAMP_57 = _zz_decode_IS_FXCLAMP_9;
+  assign _zz__zz_decode_IS_FXCLAMP_58 = _zz_decode_IS_FXCLAMP_6;
+  assign _zz__zz_decode_IS_FXCLAMP_60 = {_zz__zz_decode_IS_FXCLAMP_61,{_zz__zz_decode_IS_FXCLAMP_63,_zz__zz_decode_IS_FXCLAMP_66}};
+  assign _zz__zz_decode_IS_FXCLAMP_70 = (|{_zz__zz_decode_IS_FXCLAMP_71,_zz__zz_decode_IS_FXCLAMP_74});
+  assign _zz__zz_decode_IS_FXCLAMP_77 = (|_zz__zz_decode_IS_FXCLAMP_78);
+  assign _zz__zz_decode_IS_FXCLAMP_81 = {_zz__zz_decode_IS_FXCLAMP_82,{_zz__zz_decode_IS_FXCLAMP_87,_zz__zz_decode_IS_FXCLAMP_91}};
+  assign _zz__zz_decode_IS_FXCLAMP_35 = 32'h30000010;
+  assign _zz__zz_decode_IS_FXCLAMP_37 = (decode_INSTRUCTION & 32'h88000010);
+  assign _zz__zz_decode_IS_FXCLAMP_38 = 32'h00000010;
+  assign _zz__zz_decode_IS_FXCLAMP_40 = (decode_INSTRUCTION & 32'h50000010);
+  assign _zz__zz_decode_IS_FXCLAMP_41 = 32'h00000010;
+  assign _zz__zz_decode_IS_FXCLAMP_45 = (decode_INSTRUCTION & 32'h90000010);
+  assign _zz__zz_decode_IS_FXCLAMP_46 = 32'h90000010;
+  assign _zz__zz_decode_IS_FXCLAMP_48 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_49) == 32'h40000010);
+  assign _zz__zz_decode_IS_FXCLAMP_50 = (_zz__zz_decode_IS_FXCLAMP_51 == _zz__zz_decode_IS_FXCLAMP_52);
+  assign _zz__zz_decode_IS_FXCLAMP_53 = (_zz__zz_decode_IS_FXCLAMP_54 == _zz__zz_decode_IS_FXCLAMP_55);
+  assign _zz__zz_decode_IS_FXCLAMP_61 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_62) == 32'h10000000);
+  assign _zz__zz_decode_IS_FXCLAMP_63 = (_zz__zz_decode_IS_FXCLAMP_64 == _zz__zz_decode_IS_FXCLAMP_65);
+  assign _zz__zz_decode_IS_FXCLAMP_66 = (_zz__zz_decode_IS_FXCLAMP_67 == _zz__zz_decode_IS_FXCLAMP_68);
+  assign _zz__zz_decode_IS_FXCLAMP_71 = (_zz__zz_decode_IS_FXCLAMP_72 == _zz__zz_decode_IS_FXCLAMP_73);
+  assign _zz__zz_decode_IS_FXCLAMP_74 = (_zz__zz_decode_IS_FXCLAMP_75 == _zz__zz_decode_IS_FXCLAMP_76);
+  assign _zz__zz_decode_IS_FXCLAMP_78 = (_zz__zz_decode_IS_FXCLAMP_79 == _zz__zz_decode_IS_FXCLAMP_80);
+  assign _zz__zz_decode_IS_FXCLAMP_82 = (|{_zz__zz_decode_IS_FXCLAMP_83,_zz__zz_decode_IS_FXCLAMP_85});
+  assign _zz__zz_decode_IS_FXCLAMP_87 = (|_zz__zz_decode_IS_FXCLAMP_88);
+  assign _zz__zz_decode_IS_FXCLAMP_91 = {_zz__zz_decode_IS_FXCLAMP_92,{_zz__zz_decode_IS_FXCLAMP_95,_zz__zz_decode_IS_FXCLAMP_96}};
+  assign _zz__zz_decode_IS_FXCLAMP_49 = 32'hc0000010;
+  assign _zz__zz_decode_IS_FXCLAMP_51 = (decode_INSTRUCTION & 32'h58000010);
+  assign _zz__zz_decode_IS_FXCLAMP_52 = 32'h00000010;
+  assign _zz__zz_decode_IS_FXCLAMP_54 = (decode_INSTRUCTION & 32'hb0000010);
+  assign _zz__zz_decode_IS_FXCLAMP_55 = 32'h00000010;
+  assign _zz__zz_decode_IS_FXCLAMP_62 = 32'h10000020;
+  assign _zz__zz_decode_IS_FXCLAMP_64 = (decode_INSTRUCTION & 32'h80000020);
+  assign _zz__zz_decode_IS_FXCLAMP_65 = 32'h0;
+  assign _zz__zz_decode_IS_FXCLAMP_67 = (decode_INSTRUCTION & 32'h00000030);
+  assign _zz__zz_decode_IS_FXCLAMP_68 = 32'h0;
+  assign _zz__zz_decode_IS_FXCLAMP_72 = (decode_INSTRUCTION & 32'h00000060);
+  assign _zz__zz_decode_IS_FXCLAMP_73 = 32'h00000040;
+  assign _zz__zz_decode_IS_FXCLAMP_75 = (decode_INSTRUCTION & 32'h0000005c);
+  assign _zz__zz_decode_IS_FXCLAMP_76 = 32'h00000004;
+  assign _zz__zz_decode_IS_FXCLAMP_79 = (decode_INSTRUCTION & 32'h10003034);
+  assign _zz__zz_decode_IS_FXCLAMP_80 = 32'h10000030;
+  assign _zz__zz_decode_IS_FXCLAMP_83 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_84) == 32'h00001070);
+  assign _zz__zz_decode_IS_FXCLAMP_85 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_86) == 32'h00002070);
+  assign _zz__zz_decode_IS_FXCLAMP_88 = {_zz_decode_IS_FXCLAMP_7,(_zz__zz_decode_IS_FXCLAMP_89 == _zz__zz_decode_IS_FXCLAMP_90)};
+  assign _zz__zz_decode_IS_FXCLAMP_92 = (|(_zz__zz_decode_IS_FXCLAMP_93 == _zz__zz_decode_IS_FXCLAMP_94));
+  assign _zz__zz_decode_IS_FXCLAMP_95 = (|_zz_decode_IS_FXCLAMP_10);
+  assign _zz__zz_decode_IS_FXCLAMP_96 = {(|_zz__zz_decode_IS_FXCLAMP_97),{_zz__zz_decode_IS_FXCLAMP_98,{_zz__zz_decode_IS_FXCLAMP_99,_zz__zz_decode_IS_FXCLAMP_101}}};
+  assign _zz__zz_decode_IS_FXCLAMP_84 = 32'h00001070;
+  assign _zz__zz_decode_IS_FXCLAMP_86 = 32'h00002070;
+  assign _zz__zz_decode_IS_FXCLAMP_89 = (decode_INSTRUCTION & 32'h00002034);
+  assign _zz__zz_decode_IS_FXCLAMP_90 = 32'h00000024;
+  assign _zz__zz_decode_IS_FXCLAMP_93 = (decode_INSTRUCTION & 32'h00000078);
+  assign _zz__zz_decode_IS_FXCLAMP_94 = 32'h00000060;
+  assign _zz__zz_decode_IS_FXCLAMP_97 = _zz_decode_IS_FXCLAMP_10;
+  assign _zz__zz_decode_IS_FXCLAMP_98 = (|((decode_INSTRUCTION & 32'h02004064) == 32'h02004020));
+  assign _zz__zz_decode_IS_FXCLAMP_99 = (|((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_100) == 32'h02000030));
+  assign _zz__zz_decode_IS_FXCLAMP_101 = {(|(_zz__zz_decode_IS_FXCLAMP_102 == _zz__zz_decode_IS_FXCLAMP_103)),{(|{_zz__zz_decode_IS_FXCLAMP_104,_zz__zz_decode_IS_FXCLAMP_105}),{(|_zz__zz_decode_IS_FXCLAMP_106),{_zz__zz_decode_IS_FXCLAMP_107,{_zz__zz_decode_IS_FXCLAMP_109,_zz__zz_decode_IS_FXCLAMP_112}}}}};
+  assign _zz__zz_decode_IS_FXCLAMP_100 = 32'h02004074;
+  assign _zz__zz_decode_IS_FXCLAMP_102 = (decode_INSTRUCTION & 32'h02007054);
+  assign _zz__zz_decode_IS_FXCLAMP_103 = 32'h00005010;
+  assign _zz__zz_decode_IS_FXCLAMP_104 = ((decode_INSTRUCTION & 32'h40003054) == 32'h40001010);
+  assign _zz__zz_decode_IS_FXCLAMP_105 = ((decode_INSTRUCTION & 32'h02007054) == 32'h00001010);
+  assign _zz__zz_decode_IS_FXCLAMP_106 = ((decode_INSTRUCTION & 32'h00000034) == 32'h00000034);
+  assign _zz__zz_decode_IS_FXCLAMP_107 = (|((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_108) == 32'h00001000));
+  assign _zz__zz_decode_IS_FXCLAMP_109 = (|(_zz__zz_decode_IS_FXCLAMP_110 == _zz__zz_decode_IS_FXCLAMP_111));
+  assign _zz__zz_decode_IS_FXCLAMP_112 = {(|{_zz__zz_decode_IS_FXCLAMP_113,_zz__zz_decode_IS_FXCLAMP_115}),{(|_zz__zz_decode_IS_FXCLAMP_117),{_zz__zz_decode_IS_FXCLAMP_119,{_zz__zz_decode_IS_FXCLAMP_125,_zz__zz_decode_IS_FXCLAMP_131}}}};
+  assign _zz__zz_decode_IS_FXCLAMP_108 = 32'h00001000;
+  assign _zz__zz_decode_IS_FXCLAMP_110 = (decode_INSTRUCTION & 32'h00003000);
+  assign _zz__zz_decode_IS_FXCLAMP_111 = 32'h00002000;
+  assign _zz__zz_decode_IS_FXCLAMP_113 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_114) == 32'h00002000);
+  assign _zz__zz_decode_IS_FXCLAMP_115 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_116) == 32'h00001000);
+  assign _zz__zz_decode_IS_FXCLAMP_117 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_118) == 32'h00005008);
+  assign _zz__zz_decode_IS_FXCLAMP_119 = (|{_zz__zz_decode_IS_FXCLAMP_120,{_zz__zz_decode_IS_FXCLAMP_121,_zz__zz_decode_IS_FXCLAMP_123}});
+  assign _zz__zz_decode_IS_FXCLAMP_125 = (|{_zz__zz_decode_IS_FXCLAMP_126,_zz__zz_decode_IS_FXCLAMP_128});
+  assign _zz__zz_decode_IS_FXCLAMP_131 = {(|_zz__zz_decode_IS_FXCLAMP_132),{_zz__zz_decode_IS_FXCLAMP_133,{_zz__zz_decode_IS_FXCLAMP_146,_zz__zz_decode_IS_FXCLAMP_161}}};
+  assign _zz__zz_decode_IS_FXCLAMP_114 = 32'h00002010;
+  assign _zz__zz_decode_IS_FXCLAMP_116 = 32'h00005000;
+  assign _zz__zz_decode_IS_FXCLAMP_118 = 32'h00005048;
+  assign _zz__zz_decode_IS_FXCLAMP_120 = ((decode_INSTRUCTION & 32'h00000034) == 32'h00000020);
+  assign _zz__zz_decode_IS_FXCLAMP_121 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_122) == 32'h00000020);
+  assign _zz__zz_decode_IS_FXCLAMP_123 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_124) == 32'h00000008);
+  assign _zz__zz_decode_IS_FXCLAMP_126 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_127) == 32'h00000020);
+  assign _zz__zz_decode_IS_FXCLAMP_128 = {_zz_decode_IS_FXCLAMP_4,(_zz__zz_decode_IS_FXCLAMP_129 == _zz__zz_decode_IS_FXCLAMP_130)};
+  assign _zz__zz_decode_IS_FXCLAMP_132 = _zz_decode_IS_FXCLAMP_9;
+  assign _zz__zz_decode_IS_FXCLAMP_133 = (|{_zz_decode_IS_FXCLAMP_3,{_zz__zz_decode_IS_FXCLAMP_134,_zz__zz_decode_IS_FXCLAMP_135}});
+  assign _zz__zz_decode_IS_FXCLAMP_146 = (|{_zz__zz_decode_IS_FXCLAMP_147,_zz__zz_decode_IS_FXCLAMP_148});
+  assign _zz__zz_decode_IS_FXCLAMP_161 = {(|_zz__zz_decode_IS_FXCLAMP_162),{_zz__zz_decode_IS_FXCLAMP_183,{_zz__zz_decode_IS_FXCLAMP_188,_zz__zz_decode_IS_FXCLAMP_193}}};
+  assign _zz__zz_decode_IS_FXCLAMP_122 = 32'h00000064;
+  assign _zz__zz_decode_IS_FXCLAMP_124 = 32'h0000204c;
+  assign _zz__zz_decode_IS_FXCLAMP_127 = 32'h00000030;
+  assign _zz__zz_decode_IS_FXCLAMP_129 = (decode_INSTRUCTION & 32'h10003024);
+  assign _zz__zz_decode_IS_FXCLAMP_130 = 32'h10000020;
+  assign _zz__zz_decode_IS_FXCLAMP_134 = _zz_decode_IS_FXCLAMP_8;
+  assign _zz__zz_decode_IS_FXCLAMP_135 = {(_zz__zz_decode_IS_FXCLAMP_136 == _zz__zz_decode_IS_FXCLAMP_137),{_zz__zz_decode_IS_FXCLAMP_138,{_zz__zz_decode_IS_FXCLAMP_140,_zz__zz_decode_IS_FXCLAMP_143}}};
+  assign _zz__zz_decode_IS_FXCLAMP_147 = _zz_decode_IS_FXCLAMP_8;
+  assign _zz__zz_decode_IS_FXCLAMP_148 = {(_zz__zz_decode_IS_FXCLAMP_149 == _zz__zz_decode_IS_FXCLAMP_150),{_zz__zz_decode_IS_FXCLAMP_151,{_zz__zz_decode_IS_FXCLAMP_153,_zz__zz_decode_IS_FXCLAMP_156}}};
+  assign _zz__zz_decode_IS_FXCLAMP_162 = {_zz_decode_IS_FXCLAMP_7,{_zz__zz_decode_IS_FXCLAMP_163,{_zz__zz_decode_IS_FXCLAMP_165,_zz__zz_decode_IS_FXCLAMP_168}}};
+  assign _zz__zz_decode_IS_FXCLAMP_183 = (|{_zz_decode_IS_FXCLAMP_3,{_zz__zz_decode_IS_FXCLAMP_184,_zz__zz_decode_IS_FXCLAMP_185}});
+  assign _zz__zz_decode_IS_FXCLAMP_188 = (|{_zz__zz_decode_IS_FXCLAMP_189,_zz__zz_decode_IS_FXCLAMP_190});
+  assign _zz__zz_decode_IS_FXCLAMP_193 = {(|_zz__zz_decode_IS_FXCLAMP_194),{_zz__zz_decode_IS_FXCLAMP_197,{_zz__zz_decode_IS_FXCLAMP_200,_zz__zz_decode_IS_FXCLAMP_217}}};
+  assign _zz__zz_decode_IS_FXCLAMP_136 = (decode_INSTRUCTION & 32'h00004020);
+  assign _zz__zz_decode_IS_FXCLAMP_137 = 32'h00004020;
+  assign _zz__zz_decode_IS_FXCLAMP_138 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_139) == 32'h00000060);
+  assign _zz__zz_decode_IS_FXCLAMP_140 = (_zz__zz_decode_IS_FXCLAMP_141 == _zz__zz_decode_IS_FXCLAMP_142);
+  assign _zz__zz_decode_IS_FXCLAMP_143 = (_zz__zz_decode_IS_FXCLAMP_144 == _zz__zz_decode_IS_FXCLAMP_145);
+  assign _zz__zz_decode_IS_FXCLAMP_149 = (decode_INSTRUCTION & 32'h00004008);
+  assign _zz__zz_decode_IS_FXCLAMP_150 = 32'h00004008;
+  assign _zz__zz_decode_IS_FXCLAMP_151 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_152) == 32'h00002010);
+  assign _zz__zz_decode_IS_FXCLAMP_153 = (_zz__zz_decode_IS_FXCLAMP_154 == _zz__zz_decode_IS_FXCLAMP_155);
+  assign _zz__zz_decode_IS_FXCLAMP_156 = {_zz__zz_decode_IS_FXCLAMP_157,_zz__zz_decode_IS_FXCLAMP_159};
+  assign _zz__zz_decode_IS_FXCLAMP_163 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_164) == 32'h00000010);
+  assign _zz__zz_decode_IS_FXCLAMP_165 = (_zz__zz_decode_IS_FXCLAMP_166 == _zz__zz_decode_IS_FXCLAMP_167);
+  assign _zz__zz_decode_IS_FXCLAMP_168 = {_zz__zz_decode_IS_FXCLAMP_169,{_zz__zz_decode_IS_FXCLAMP_171,_zz__zz_decode_IS_FXCLAMP_172}};
+  assign _zz__zz_decode_IS_FXCLAMP_184 = _zz_decode_IS_FXCLAMP_2;
+  assign _zz__zz_decode_IS_FXCLAMP_185 = {_zz_decode_IS_FXCLAMP_5,_zz__zz_decode_IS_FXCLAMP_186};
+  assign _zz__zz_decode_IS_FXCLAMP_189 = _zz_decode_IS_FXCLAMP_3;
+  assign _zz__zz_decode_IS_FXCLAMP_190 = {_zz__zz_decode_IS_FXCLAMP_191,_zz_decode_IS_FXCLAMP_5};
+  assign _zz__zz_decode_IS_FXCLAMP_194 = (_zz__zz_decode_IS_FXCLAMP_195 == _zz__zz_decode_IS_FXCLAMP_196);
+  assign _zz__zz_decode_IS_FXCLAMP_197 = (|_zz__zz_decode_IS_FXCLAMP_198);
+  assign _zz__zz_decode_IS_FXCLAMP_200 = (|_zz__zz_decode_IS_FXCLAMP_201);
+  assign _zz__zz_decode_IS_FXCLAMP_217 = {_zz__zz_decode_IS_FXCLAMP_218,{_zz__zz_decode_IS_FXCLAMP_219,_zz__zz_decode_IS_FXCLAMP_229}};
+  assign _zz__zz_decode_IS_FXCLAMP_139 = 32'h00000060;
+  assign _zz__zz_decode_IS_FXCLAMP_141 = (decode_INSTRUCTION & 32'h02000020);
+  assign _zz__zz_decode_IS_FXCLAMP_142 = 32'h00000020;
+  assign _zz__zz_decode_IS_FXCLAMP_144 = (decode_INSTRUCTION & 32'h00000070);
+  assign _zz__zz_decode_IS_FXCLAMP_145 = 32'h00000010;
+  assign _zz__zz_decode_IS_FXCLAMP_152 = 32'h00002070;
+  assign _zz__zz_decode_IS_FXCLAMP_154 = (decode_INSTRUCTION & 32'h02002060);
+  assign _zz__zz_decode_IS_FXCLAMP_155 = 32'h00002020;
+  assign _zz__zz_decode_IS_FXCLAMP_157 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_158) == 32'h00000010);
+  assign _zz__zz_decode_IS_FXCLAMP_159 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_160) == 32'h00000020);
+  assign _zz__zz_decode_IS_FXCLAMP_164 = 32'h00000050;
+  assign _zz__zz_decode_IS_FXCLAMP_166 = (decode_INSTRUCTION & 32'h00001030);
+  assign _zz__zz_decode_IS_FXCLAMP_167 = 32'h00001030;
+  assign _zz__zz_decode_IS_FXCLAMP_169 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_170) == 32'h00002030);
+  assign _zz__zz_decode_IS_FXCLAMP_171 = _zz_decode_IS_FXCLAMP_6;
+  assign _zz__zz_decode_IS_FXCLAMP_172 = {_zz__zz_decode_IS_FXCLAMP_173,{_zz__zz_decode_IS_FXCLAMP_175,_zz__zz_decode_IS_FXCLAMP_178}};
+  assign _zz__zz_decode_IS_FXCLAMP_186 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_187) == 32'h00000020);
+  assign _zz__zz_decode_IS_FXCLAMP_191 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_192) == 32'h0);
+  assign _zz__zz_decode_IS_FXCLAMP_195 = (decode_INSTRUCTION & 32'h00004014);
+  assign _zz__zz_decode_IS_FXCLAMP_196 = 32'h00004010;
+  assign _zz__zz_decode_IS_FXCLAMP_198 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_199) == 32'h00002010);
+  assign _zz__zz_decode_IS_FXCLAMP_201 = {_zz__zz_decode_IS_FXCLAMP_202,{_zz__zz_decode_IS_FXCLAMP_204,_zz__zz_decode_IS_FXCLAMP_207}};
+  assign _zz__zz_decode_IS_FXCLAMP_218 = (|_zz_decode_IS_FXCLAMP_4);
+  assign _zz__zz_decode_IS_FXCLAMP_219 = (|_zz__zz_decode_IS_FXCLAMP_220);
+  assign _zz__zz_decode_IS_FXCLAMP_229 = {_zz__zz_decode_IS_FXCLAMP_230,{_zz__zz_decode_IS_FXCLAMP_234,_zz__zz_decode_IS_FXCLAMP_236}};
+  assign _zz__zz_decode_IS_FXCLAMP_158 = 32'h00001070;
+  assign _zz__zz_decode_IS_FXCLAMP_160 = 32'h02003020;
+  assign _zz__zz_decode_IS_FXCLAMP_170 = 32'h00002030;
+  assign _zz__zz_decode_IS_FXCLAMP_173 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_174) == 32'h00000024);
+  assign _zz__zz_decode_IS_FXCLAMP_175 = (_zz__zz_decode_IS_FXCLAMP_176 == _zz__zz_decode_IS_FXCLAMP_177);
+  assign _zz__zz_decode_IS_FXCLAMP_178 = {_zz__zz_decode_IS_FXCLAMP_179,_zz__zz_decode_IS_FXCLAMP_181};
+  assign _zz__zz_decode_IS_FXCLAMP_187 = 32'h00000070;
+  assign _zz__zz_decode_IS_FXCLAMP_192 = 32'h00000020;
+  assign _zz__zz_decode_IS_FXCLAMP_199 = 32'h00006014;
+  assign _zz__zz_decode_IS_FXCLAMP_202 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_203) == 32'h00000020);
+  assign _zz__zz_decode_IS_FXCLAMP_204 = (_zz__zz_decode_IS_FXCLAMP_205 == _zz__zz_decode_IS_FXCLAMP_206);
+  assign _zz__zz_decode_IS_FXCLAMP_207 = {_zz__zz_decode_IS_FXCLAMP_208,{_zz__zz_decode_IS_FXCLAMP_210,_zz__zz_decode_IS_FXCLAMP_213}};
+  assign _zz__zz_decode_IS_FXCLAMP_220 = {_zz__zz_decode_IS_FXCLAMP_221,{_zz__zz_decode_IS_FXCLAMP_223,_zz__zz_decode_IS_FXCLAMP_226}};
+  assign _zz__zz_decode_IS_FXCLAMP_230 = (|{_zz__zz_decode_IS_FXCLAMP_231,_zz__zz_decode_IS_FXCLAMP_232});
+  assign _zz__zz_decode_IS_FXCLAMP_234 = (|_zz__zz_decode_IS_FXCLAMP_235);
+  assign _zz__zz_decode_IS_FXCLAMP_236 = (|_zz__zz_decode_IS_FXCLAMP_237);
+  assign _zz__zz_decode_IS_FXCLAMP_174 = 32'h00002024;
+  assign _zz__zz_decode_IS_FXCLAMP_176 = (decode_INSTRUCTION & 32'h00002064);
+  assign _zz__zz_decode_IS_FXCLAMP_177 = 32'h00002000;
+  assign _zz__zz_decode_IS_FXCLAMP_179 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_180) == 32'h0);
+  assign _zz__zz_decode_IS_FXCLAMP_181 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_182) == 32'h0);
+  assign _zz__zz_decode_IS_FXCLAMP_203 = 32'h00000038;
+  assign _zz__zz_decode_IS_FXCLAMP_205 = (decode_INSTRUCTION & 32'h00001044);
+  assign _zz__zz_decode_IS_FXCLAMP_206 = 32'h00001000;
+  assign _zz__zz_decode_IS_FXCLAMP_208 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_209) == 32'h00004000);
+  assign _zz__zz_decode_IS_FXCLAMP_210 = (_zz__zz_decode_IS_FXCLAMP_211 == _zz__zz_decode_IS_FXCLAMP_212);
+  assign _zz__zz_decode_IS_FXCLAMP_213 = {_zz__zz_decode_IS_FXCLAMP_214,{_zz__zz_decode_IS_FXCLAMP_215,_zz__zz_decode_IS_FXCLAMP_216}};
+  assign _zz__zz_decode_IS_FXCLAMP_221 = ((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP_222) == 32'h00000040);
+  assign _zz__zz_decode_IS_FXCLAMP_223 = (_zz__zz_decode_IS_FXCLAMP_224 == _zz__zz_decode_IS_FXCLAMP_225);
+  assign _zz__zz_decode_IS_FXCLAMP_226 = (_zz__zz_decode_IS_FXCLAMP_227 == _zz__zz_decode_IS_FXCLAMP_228);
+  assign _zz__zz_decode_IS_FXCLAMP_231 = _zz_decode_IS_FXCLAMP_3;
+  assign _zz__zz_decode_IS_FXCLAMP_232 = {_zz_decode_IS_FXCLAMP_1,_zz__zz_decode_IS_FXCLAMP_233};
+  assign _zz__zz_decode_IS_FXCLAMP_235 = {_zz_decode_IS_FXCLAMP_2,_zz_decode_IS_FXCLAMP_1};
+  assign _zz__zz_decode_IS_FXCLAMP_237 = (_zz__zz_decode_IS_FXCLAMP_238 == _zz__zz_decode_IS_FXCLAMP_239);
+  assign _zz__zz_decode_IS_FXCLAMP_180 = 32'h0000006c;
+  assign _zz__zz_decode_IS_FXCLAMP_182 = 32'h00001064;
+  assign _zz__zz_decode_IS_FXCLAMP_209 = 32'h00004050;
+  assign _zz__zz_decode_IS_FXCLAMP_211 = (decode_INSTRUCTION & 32'h0000004c);
+  assign _zz__zz_decode_IS_FXCLAMP_212 = 32'h0;
+  assign _zz__zz_decode_IS_FXCLAMP_214 = ((decode_INSTRUCTION & 32'h00002044) == 32'h0);
+  assign _zz__zz_decode_IS_FXCLAMP_215 = _zz_decode_IS_FXCLAMP_4;
+  assign _zz__zz_decode_IS_FXCLAMP_216 = {((decode_INSTRUCTION & 32'h00006024) == 32'h00002020),{((decode_INSTRUCTION & 32'h00005024) == 32'h00001020),((decode_INSTRUCTION & 32'h90000034) == 32'h90000010)}};
+  assign _zz__zz_decode_IS_FXCLAMP_222 = 32'h00000044;
+  assign _zz__zz_decode_IS_FXCLAMP_224 = (decode_INSTRUCTION & 32'h00002014);
+  assign _zz__zz_decode_IS_FXCLAMP_225 = 32'h00002010;
+  assign _zz__zz_decode_IS_FXCLAMP_227 = (decode_INSTRUCTION & 32'h40000034);
+  assign _zz__zz_decode_IS_FXCLAMP_228 = 32'h40000030;
+  assign _zz__zz_decode_IS_FXCLAMP_233 = ((decode_INSTRUCTION & 32'h00002014) == 32'h00000004);
+  assign _zz__zz_decode_IS_FXCLAMP_238 = (decode_INSTRUCTION & 32'h00005054);
+  assign _zz__zz_decode_IS_FXCLAMP_239 = 32'h00001004;
   assign _zz_execute_BranchPlugin_branch_src2_6 = execute_INSTRUCTION[31];
   assign _zz_execute_BranchPlugin_branch_src2_7 = execute_INSTRUCTION[19 : 12];
   assign _zz_execute_BranchPlugin_branch_src2_8 = execute_INSTRUCTION[20];
@@ -2415,10 +2538,10 @@ module VexRiscv (
     .io_mem_cmd_payload_mask                (dataCache_1_io_mem_cmd_payload_mask[3:0]         ), //o
     .io_mem_cmd_payload_size                (dataCache_1_io_mem_cmd_payload_size[2:0]         ), //o
     .io_mem_cmd_payload_last                (dataCache_1_io_mem_cmd_payload_last              ), //o
-    .io_mem_rsp_valid                       (dBus_rsp_valid                                   ), //i
-    .io_mem_rsp_payload_last                (dBus_rsp_payload_last                            ), //i
-    .io_mem_rsp_payload_data                (dBus_rsp_payload_data[31:0]                      ), //i
-    .io_mem_rsp_payload_error               (dBus_rsp_payload_error                           ), //i
+    .io_mem_rsp_valid                       (dBus_rsp_regNext_valid                           ), //i
+    .io_mem_rsp_payload_last                (dBus_rsp_regNext_payload_last                    ), //i
+    .io_mem_rsp_payload_data                (dBus_rsp_regNext_payload_data[31:0]              ), //i
+    .io_mem_rsp_payload_error               (dBus_rsp_regNext_payload_error                   ), //i
     .clk                                    (clk                                              ), //i
     .reset                                  (reset                                            )  //i
   );
@@ -3737,12 +3860,14 @@ module VexRiscv (
 
   assign writeBack_MEMORY_LOAD_DATA = writeBack_DBusCachedPlugin_rspShifted;
   assign memory_MUL_LOW = ($signed(_zz_memory_MUL_LOW) + $signed(_zz_memory_MUL_LOW_6));
-  assign execute_RCP_ZERO = execute_FixedPointMacPlugin_isZero;
-  assign execute_RCP_SIGN = execute_FixedPointMacPlugin_isNeg;
-  assign execute_RCP_SHIFT = execute_FixedPointMacPlugin_clz;
-  assign execute_RCP_XY = execute_FixedPointMacPlugin_xy;
-  assign execute_RCP_Y0 = execute_FixedPointMacPlugin_y0;
-  assign execute_FX_PRODUCT = (execute_FixedPointMacPlugin_isFx ? _zz_execute_FX_PRODUCT : 32'h0);
+  assign execute_RCP_ZERO = _zz_execute_RCP_ZERO;
+  assign execute_RCP_SIGN = _zz_execute_RCP_SIGN;
+  assign execute_RCP_SHIFT = _zz_execute_RCP_SHIFT;
+  assign execute_RCP_Y1 = _zz_execute_RCP_Y1;
+  assign execute_FX_MUL_HH = _zz_execute_FX_MUL_HH;
+  assign execute_FX_MUL_HL = _zz_execute_FX_MUL_HL;
+  assign execute_FX_MUL_LH = _zz_execute_FX_MUL_LH;
+  assign execute_FX_MUL_LL = _zz_execute_FX_MUL_LL;
   assign execute_BRANCH_CALC = {execute_BranchPlugin_branchAdder[31 : 1],1'b0};
   assign execute_BRANCH_DO = ((execute_PREDICTION_HAD_BRANCHED1 != execute_BRANCH_COND_RESULT) || execute_BranchPlugin_missAlignedTarget);
   assign memory_MUL_HH = execute_to_memory_MUL_HH;
@@ -3765,12 +3890,14 @@ module VexRiscv (
   assign decode_PREDICTION_HAD_BRANCHED1 = IBusCachedPlugin_decodePrediction_cmd_hadBranch;
   assign decode_SRC2_FORCE_ZERO = (decode_SRC_ADD_ZERO && (! decode_SRC_USE_SUB_LESS));
   assign memory_RS1 = execute_to_memory_RS1;
-  assign execute_IS_FXRCP = decode_to_execute_IS_FXRCP;
-  assign decode_IS_FXRCP = _zz_decode_IS_FXRCP[44];
+  assign decode_IS_FXCLAMP = _zz_decode_IS_FXCLAMP[45];
+  assign decode_IS_FXRCP = _zz_decode_IS_FXCLAMP[44];
   assign execute_IS_FXMACR = decode_to_execute_IS_FXMACR;
-  assign decode_IS_FXMACR = _zz_decode_IS_FXRCP[43];
-  assign decode_IS_FXMACS = _zz_decode_IS_FXRCP[42];
-  assign decode_IS_FXMUL = _zz_decode_IS_FXRCP[41];
+  assign decode_IS_FXMACR = _zz_decode_IS_FXCLAMP[43];
+  assign execute_IS_FXMACS = decode_to_execute_IS_FXMACS;
+  assign decode_IS_FXMACS = _zz_decode_IS_FXCLAMP[42];
+  assign execute_IS_FXMUL = decode_to_execute_IS_FXMUL;
+  assign decode_IS_FXMUL = _zz_decode_IS_FXCLAMP[41];
   assign memory_FPU_OPCODE = _zz_memory_FPU_OPCODE;
   assign _zz_memory_to_writeBack_FPU_OPCODE = _zz_memory_to_writeBack_FPU_OPCODE_1;
   assign execute_FPU_OPCODE = _zz_execute_FPU_OPCODE;
@@ -3778,35 +3905,35 @@ module VexRiscv (
   assign _zz_decode_to_execute_FPU_OPCODE = _zz_decode_to_execute_FPU_OPCODE_1;
   assign memory_FPU_RSP = execute_to_memory_FPU_RSP;
   assign execute_FPU_RSP = decode_to_execute_FPU_RSP;
-  assign decode_FPU_RSP = _zz_decode_IS_FXRCP[33];
+  assign decode_FPU_RSP = _zz_decode_IS_FXCLAMP[33];
   assign memory_FPU_COMMIT = execute_to_memory_FPU_COMMIT;
   assign execute_FPU_COMMIT = decode_to_execute_FPU_COMMIT;
-  assign decode_FPU_COMMIT = _zz_decode_IS_FXRCP[32];
+  assign decode_FPU_COMMIT = _zz_decode_IS_FXCLAMP[32];
   assign _zz_memory_to_writeBack_ENV_CTRL = _zz_memory_to_writeBack_ENV_CTRL_1;
   assign _zz_execute_to_memory_ENV_CTRL = _zz_execute_to_memory_ENV_CTRL_1;
   assign decode_ENV_CTRL = _zz_decode_ENV_CTRL;
   assign _zz_decode_to_execute_ENV_CTRL = _zz_decode_to_execute_ENV_CTRL_1;
-  assign decode_IS_CSR = _zz_decode_IS_FXRCP[29];
+  assign decode_IS_CSR = _zz_decode_IS_FXCLAMP[29];
   assign _zz_execute_to_memory_BRANCH_CTRL = _zz_execute_to_memory_BRANCH_CTRL_1;
   assign _zz_decode_to_execute_BRANCH_CTRL = _zz_decode_to_execute_BRANCH_CTRL_1;
-  assign decode_IS_RS2_SIGNED = _zz_decode_IS_FXRCP[26];
-  assign decode_IS_RS1_SIGNED = _zz_decode_IS_FXRCP[25];
-  assign decode_IS_DIV = _zz_decode_IS_FXRCP[24];
+  assign decode_IS_RS2_SIGNED = _zz_decode_IS_FXCLAMP[26];
+  assign decode_IS_RS1_SIGNED = _zz_decode_IS_FXCLAMP[25];
+  assign decode_IS_DIV = _zz_decode_IS_FXCLAMP[24];
   assign memory_IS_MUL = execute_to_memory_IS_MUL;
   assign execute_IS_MUL = decode_to_execute_IS_MUL;
-  assign decode_IS_MUL = _zz_decode_IS_FXRCP[23];
+  assign decode_IS_MUL = _zz_decode_IS_FXCLAMP[23];
   assign _zz_execute_to_memory_SHIFT_CTRL = _zz_execute_to_memory_SHIFT_CTRL_1;
   assign decode_SHIFT_CTRL = _zz_decode_SHIFT_CTRL;
   assign _zz_decode_to_execute_SHIFT_CTRL = _zz_decode_to_execute_SHIFT_CTRL_1;
   assign decode_ALU_BITWISE_CTRL = _zz_decode_ALU_BITWISE_CTRL;
   assign _zz_decode_to_execute_ALU_BITWISE_CTRL = _zz_decode_to_execute_ALU_BITWISE_CTRL_1;
-  assign decode_SRC_LESS_UNSIGNED = _zz_decode_IS_FXRCP[17];
-  assign decode_MEMORY_MANAGMENT = _zz_decode_IS_FXRCP[16];
+  assign decode_SRC_LESS_UNSIGNED = _zz_decode_IS_FXCLAMP[17];
+  assign decode_MEMORY_MANAGMENT = _zz_decode_IS_FXCLAMP[16];
   assign memory_MEMORY_WR = execute_to_memory_MEMORY_WR;
-  assign decode_MEMORY_WR = _zz_decode_IS_FXRCP[13];
+  assign decode_MEMORY_WR = _zz_decode_IS_FXCLAMP[13];
   assign execute_BYPASSABLE_MEMORY_STAGE = decode_to_execute_BYPASSABLE_MEMORY_STAGE;
-  assign decode_BYPASSABLE_MEMORY_STAGE = _zz_decode_IS_FXRCP[12];
-  assign decode_BYPASSABLE_EXECUTE_STAGE = _zz_decode_IS_FXRCP[11];
+  assign decode_BYPASSABLE_MEMORY_STAGE = _zz_decode_IS_FXCLAMP[12];
+  assign decode_BYPASSABLE_EXECUTE_STAGE = _zz_decode_IS_FXCLAMP[11];
   assign decode_SRC2_CTRL = _zz_decode_SRC2_CTRL;
   assign _zz_decode_to_execute_SRC2_CTRL = _zz_decode_to_execute_SRC2_CTRL_1;
   assign decode_ALU_CTRL = _zz_decode_ALU_CTRL;
@@ -3823,15 +3950,17 @@ module VexRiscv (
   assign memory_RCP_ZERO = execute_to_memory_RCP_ZERO;
   assign memory_RCP_SIGN = execute_to_memory_RCP_SIGN;
   assign memory_RCP_SHIFT = execute_to_memory_RCP_SHIFT;
-  assign memory_RCP_XY = execute_to_memory_RCP_XY;
-  assign memory_RCP_Y0 = execute_to_memory_RCP_Y0;
+  assign memory_RCP_Y1 = execute_to_memory_RCP_Y1;
   assign memory_IS_FXRCP = execute_to_memory_IS_FXRCP;
   assign memory_IS_FXMACR = execute_to_memory_IS_FXMACR;
   assign memory_IS_FXMACS = execute_to_memory_IS_FXMACS;
   assign memory_IS_FXMUL = execute_to_memory_IS_FXMUL;
-  assign memory_FX_PRODUCT = execute_to_memory_FX_PRODUCT;
-  assign execute_IS_FXMACS = decode_to_execute_IS_FXMACS;
-  assign execute_IS_FXMUL = decode_to_execute_IS_FXMUL;
+  assign memory_FX_MUL_HH = execute_to_memory_FX_MUL_HH;
+  assign memory_FX_MUL_HL = execute_to_memory_FX_MUL_HL;
+  assign memory_FX_MUL_LH = execute_to_memory_FX_MUL_LH;
+  assign memory_FX_MUL_LL = execute_to_memory_FX_MUL_LL;
+  assign execute_IS_FXCLAMP = decode_to_execute_IS_FXCLAMP;
+  assign execute_IS_FXRCP = decode_to_execute_IS_FXRCP;
   always @(*) begin
     _zz_memory_to_writeBack_FPU_FORKED = memory_FPU_FORKED;
     if(memory_arbitration_isStuck) begin
@@ -3868,7 +3997,7 @@ module VexRiscv (
   assign writeBack_FPU_COMMIT = memory_to_writeBack_FPU_COMMIT;
   assign writeBack_FPU_RSP = memory_to_writeBack_FPU_RSP;
   assign writeBack_FPU_FORKED = memory_to_writeBack_FPU_FORKED;
-  assign decode_FPU_ARG = _zz_decode_IS_FXRCP[40 : 39];
+  assign decode_FPU_ARG = _zz_decode_IS_FXCLAMP[40 : 39];
   assign decode_FPU_OPCODE = _zz_decode_FPU_OPCODE;
   always @(*) begin
     decode_FPU_ENABLE = _zz_decode_FPU_ENABLE;
@@ -3889,12 +4018,15 @@ module VexRiscv (
   assign execute_BRANCH_COND_RESULT = _zz_execute_BRANCH_COND_RESULT_1;
   assign execute_PREDICTION_HAD_BRANCHED1 = decode_to_execute_PREDICTION_HAD_BRANCHED1;
   assign execute_BRANCH_CTRL = _zz_execute_BRANCH_CTRL;
-  assign decode_RS2_USE = _zz_decode_IS_FXRCP[15];
-  assign decode_RS1_USE = _zz_decode_IS_FXRCP[5];
+  assign decode_RS2_USE = _zz_decode_IS_FXCLAMP[15];
+  assign decode_RS1_USE = _zz_decode_IS_FXCLAMP[5];
   always @(*) begin
     _zz_decode_RS2 = execute_REGFILE_WRITE_DATA;
     if(when_CsrPlugin_l1587) begin
       _zz_decode_RS2 = CsrPlugin_csrMapping_readDataSignal;
+    end
+    if(execute_IS_FXCLAMP) begin
+      _zz_decode_RS2 = _zz__zz_decode_RS2;
     end
   end
 
@@ -3993,13 +4125,13 @@ module VexRiscv (
       _zz_decode_RS2_1 = memory_DivPlugin_div_result;
     end
     if(memory_IS_FXMUL) begin
-      _zz_decode_RS2_1 = memory_FX_PRODUCT;
+      _zz_decode_RS2_1 = memory_FixedPointMacPlugin_fxProduct;
     end
     if(memory_IS_FXMACR) begin
-      _zz_decode_RS2_1 = _zz__zz_decode_RS2_1;
+      _zz_decode_RS2_1 = _zz__zz_decode_RS2_1_1;
     end
     if(memory_IS_FXRCP) begin
-      _zz_decode_RS2_1 = _zz__zz_decode_RS2_1_1;
+      _zz_decode_RS2_1 = _zz__zz_decode_RS2_1_2;
     end
   end
 
@@ -4013,8 +4145,8 @@ module VexRiscv (
   assign execute_IS_RVC = decode_to_execute_IS_RVC;
   assign _zz_execute_to_memory_RS1 = execute_RS1;
   assign execute_SRC1_CTRL = _zz_execute_SRC1_CTRL;
-  assign decode_SRC_USE_SUB_LESS = _zz_decode_IS_FXRCP[3];
-  assign decode_SRC_ADD_ZERO = _zz_decode_IS_FXRCP[20];
+  assign decode_SRC_USE_SUB_LESS = _zz_decode_IS_FXCLAMP[3];
+  assign decode_SRC_ADD_ZERO = _zz_decode_IS_FXCLAMP[20];
   assign execute_SRC_ADD_SUB = execute_SrcPlugin_addSub;
   assign execute_SRC_LESS = execute_SrcPlugin_less;
   assign execute_ALU_CTRL = _zz_execute_ALU_CTRL;
@@ -4032,7 +4164,7 @@ module VexRiscv (
 
   assign decode_INSTRUCTION_ANTICIPATED = (decode_arbitration_isStuck ? decode_INSTRUCTION : IBusCachedPlugin_decompressor_output_payload_rsp_inst);
   always @(*) begin
-    decode_REGFILE_WRITE_VALID = _zz_decode_IS_FXRCP[10];
+    decode_REGFILE_WRITE_VALID = _zz_decode_IS_FXCLAMP[10];
     if(when_RegFilePlugin_l63) begin
       decode_REGFILE_WRITE_VALID = 1'b0;
     end
@@ -4081,8 +4213,8 @@ module VexRiscv (
   assign execute_SRC_ADD = execute_SrcPlugin_addSub;
   assign execute_MEMORY_ENABLE = decode_to_execute_MEMORY_ENABLE;
   assign execute_INSTRUCTION = decode_to_execute_INSTRUCTION;
-  assign decode_MEMORY_ENABLE = _zz_decode_IS_FXRCP[4];
-  assign decode_FLUSH_ALL = _zz_decode_IS_FXRCP[0];
+  assign decode_MEMORY_ENABLE = _zz_decode_IS_FXCLAMP[4];
+  assign decode_FLUSH_ALL = _zz_decode_IS_FXCLAMP[0];
   always @(*) begin
     IBusCachedPlugin_rsp_issueDetected_4 = IBusCachedPlugin_rsp_issueDetected_3;
     if(when_IBusCachedPlugin_l262) begin
@@ -4200,6 +4332,15 @@ module VexRiscv (
     if(when_CsrPlugin_l1591) begin
       if(execute_CsrPlugin_blockedBySideEffects) begin
         execute_arbitration_haltItself = 1'b1;
+      end
+    end
+    if(when_FixedPointMacPlugin_l229) begin
+      if(when_FixedPointMacPlugin_l230) begin
+        execute_arbitration_haltItself = 1'b1;
+      end else begin
+        if(when_FixedPointMacPlugin_l238) begin
+          execute_arbitration_haltItself = 1'b1;
+        end
       end
     end
   end
@@ -5138,33 +5279,33 @@ module VexRiscv (
   assign DBusCachedPlugin_mmuBus_rsp_exception = 1'b0;
   assign DBusCachedPlugin_mmuBus_rsp_refilling = 1'b0;
   assign DBusCachedPlugin_mmuBus_busy = 1'b0;
-  assign _zz_decode_IS_FXRCP_1 = ((decode_INSTRUCTION & 32'h00004050) == 32'h00004050);
-  assign _zz_decode_IS_FXRCP_2 = ((decode_INSTRUCTION & 32'h00000014) == 32'h00000014);
-  assign _zz_decode_IS_FXRCP_3 = ((decode_INSTRUCTION & 32'h00000008) == 32'h00000008);
-  assign _zz_decode_IS_FXRCP_4 = ((decode_INSTRUCTION & 32'h00000058) == 32'h0);
-  assign _zz_decode_IS_FXRCP_5 = ((decode_INSTRUCTION & 32'h00002004) == 32'h00000004);
-  assign _zz_decode_IS_FXRCP_6 = ((decode_INSTRUCTION & 32'h90000010) == 32'h80000010);
-  assign _zz_decode_IS_FXRCP_7 = ((decode_INSTRUCTION & 32'h00000028) == 32'h00000028);
-  assign _zz_decode_IS_FXRCP_8 = ((decode_INSTRUCTION & 32'h00000004) == 32'h00000004);
-  assign _zz_decode_IS_FXRCP_9 = ((decode_INSTRUCTION & 32'h00000020) == 32'h00000020);
-  assign _zz_decode_IS_FXRCP_10 = ((decode_INSTRUCTION & 32'h00001000) == 32'h0);
-  assign _zz_decode_IS_FXRCP = {(|((decode_INSTRUCTION & 32'h00003050) == 32'h00003000)),{(|((decode_INSTRUCTION & _zz__zz_decode_IS_FXRCP) == 32'h00002008)),{(|(_zz__zz_decode_IS_FXRCP_1 == _zz__zz_decode_IS_FXRCP_2)),{(|_zz__zz_decode_IS_FXRCP_3),{(|_zz__zz_decode_IS_FXRCP_4),{_zz__zz_decode_IS_FXRCP_6,{_zz__zz_decode_IS_FXRCP_12,_zz__zz_decode_IS_FXRCP_13}}}}}}};
-  assign _zz_decode_SRC1_CTRL_2 = _zz_decode_IS_FXRCP[2 : 1];
+  assign _zz_decode_IS_FXCLAMP_1 = ((decode_INSTRUCTION & 32'h00004050) == 32'h00004050);
+  assign _zz_decode_IS_FXCLAMP_2 = ((decode_INSTRUCTION & 32'h00000014) == 32'h00000014);
+  assign _zz_decode_IS_FXCLAMP_3 = ((decode_INSTRUCTION & 32'h00000008) == 32'h00000008);
+  assign _zz_decode_IS_FXCLAMP_4 = ((decode_INSTRUCTION & 32'h00000058) == 32'h0);
+  assign _zz_decode_IS_FXCLAMP_5 = ((decode_INSTRUCTION & 32'h00002004) == 32'h00000004);
+  assign _zz_decode_IS_FXCLAMP_6 = ((decode_INSTRUCTION & 32'h90000010) == 32'h80000010);
+  assign _zz_decode_IS_FXCLAMP_7 = ((decode_INSTRUCTION & 32'h00000028) == 32'h00000028);
+  assign _zz_decode_IS_FXCLAMP_8 = ((decode_INSTRUCTION & 32'h00000004) == 32'h00000004);
+  assign _zz_decode_IS_FXCLAMP_9 = ((decode_INSTRUCTION & 32'h00000020) == 32'h00000020);
+  assign _zz_decode_IS_FXCLAMP_10 = ((decode_INSTRUCTION & 32'h00001000) == 32'h0);
+  assign _zz_decode_IS_FXCLAMP = {(|((decode_INSTRUCTION & 32'h00005048) == 32'h00004008)),{(|((decode_INSTRUCTION & _zz__zz_decode_IS_FXCLAMP) == 32'h00003000)),{(|(_zz__zz_decode_IS_FXCLAMP_1 == _zz__zz_decode_IS_FXCLAMP_2)),{(|_zz__zz_decode_IS_FXCLAMP_3),{(|_zz__zz_decode_IS_FXCLAMP_4),{_zz__zz_decode_IS_FXCLAMP_5,{_zz__zz_decode_IS_FXCLAMP_8,_zz__zz_decode_IS_FXCLAMP_16}}}}}}};
+  assign _zz_decode_SRC1_CTRL_2 = _zz_decode_IS_FXCLAMP[2 : 1];
   assign _zz_decode_SRC1_CTRL_1 = _zz_decode_SRC1_CTRL_2;
-  assign _zz_decode_ALU_CTRL_2 = _zz_decode_IS_FXRCP[7 : 6];
+  assign _zz_decode_ALU_CTRL_2 = _zz_decode_IS_FXCLAMP[7 : 6];
   assign _zz_decode_ALU_CTRL_1 = _zz_decode_ALU_CTRL_2;
-  assign _zz_decode_SRC2_CTRL_2 = _zz_decode_IS_FXRCP[9 : 8];
+  assign _zz_decode_SRC2_CTRL_2 = _zz_decode_IS_FXCLAMP[9 : 8];
   assign _zz_decode_SRC2_CTRL_1 = _zz_decode_SRC2_CTRL_2;
-  assign _zz_decode_ALU_BITWISE_CTRL_2 = _zz_decode_IS_FXRCP[19 : 18];
+  assign _zz_decode_ALU_BITWISE_CTRL_2 = _zz_decode_IS_FXCLAMP[19 : 18];
   assign _zz_decode_ALU_BITWISE_CTRL_1 = _zz_decode_ALU_BITWISE_CTRL_2;
-  assign _zz_decode_SHIFT_CTRL_2 = _zz_decode_IS_FXRCP[22 : 21];
+  assign _zz_decode_SHIFT_CTRL_2 = _zz_decode_IS_FXCLAMP[22 : 21];
   assign _zz_decode_SHIFT_CTRL_1 = _zz_decode_SHIFT_CTRL_2;
-  assign _zz_decode_BRANCH_CTRL_2 = _zz_decode_IS_FXRCP[28 : 27];
+  assign _zz_decode_BRANCH_CTRL_2 = _zz_decode_IS_FXCLAMP[28 : 27];
   assign _zz_decode_BRANCH_CTRL = _zz_decode_BRANCH_CTRL_2;
-  assign _zz_decode_ENV_CTRL_2 = _zz_decode_IS_FXRCP[30 : 30];
+  assign _zz_decode_ENV_CTRL_2 = _zz_decode_IS_FXCLAMP[30 : 30];
   assign _zz_decode_ENV_CTRL_1 = _zz_decode_ENV_CTRL_2;
-  assign _zz_decode_FPU_ENABLE = _zz_decode_IS_FXRCP[31];
-  assign _zz_decode_FPU_OPCODE_2 = _zz_decode_IS_FXRCP[37 : 34];
+  assign _zz_decode_FPU_ENABLE = _zz_decode_IS_FXCLAMP[31];
+  assign _zz_decode_FPU_OPCODE_2 = _zz_decode_IS_FXCLAMP[37 : 34];
   assign _zz_decode_FPU_OPCODE_1 = _zz_decode_FPU_OPCODE_2;
   assign decodeExceptionPort_valid = (decode_arbitration_isValid && (! decode_LEGAL_INSTRUCTION));
   assign decodeExceptionPort_payload_code = 4'b0010;
@@ -6033,157 +6174,217 @@ module VexRiscv (
   assign FpuPlugin_port_commit_payload_rd = writeBack_FpuPlugin_commit_s2mPipe_payload_rd;
   assign FpuPlugin_port_commit_payload_write = writeBack_FpuPlugin_commit_s2mPipe_payload_write;
   assign FpuPlugin_port_commit_payload_value = writeBack_FpuPlugin_commit_s2mPipe_payload_value;
-  assign execute_FixedPointMacPlugin_isFx = (execute_IS_FXMUL || execute_IS_FXMACS);
   assign execute_FixedPointMacPlugin_a = execute_RS1;
   assign execute_FixedPointMacPlugin_b = execute_RS2;
-  assign execute_FixedPointMacPlugin_product = ($signed(execute_FixedPointMacPlugin_a) * $signed(execute_FixedPointMacPlugin_b));
-  assign execute_FixedPointMacPlugin_rs1 = execute_RS1;
-  assign execute_FixedPointMacPlugin_isNeg = execute_FixedPointMacPlugin_rs1[31];
-  assign execute_FixedPointMacPlugin_isZero = ($signed(execute_FixedPointMacPlugin_rs1) == $signed(32'h0));
-  assign execute_FixedPointMacPlugin_absVal = (execute_FixedPointMacPlugin_isNeg ? _zz_execute_FixedPointMacPlugin_absVal : execute_FixedPointMacPlugin_rs1);
+  assign execute_FixedPointMacPlugin_aULow = _zz_execute_FixedPointMacPlugin_aULow;
+  assign execute_FixedPointMacPlugin_bULow = _zz_execute_FixedPointMacPlugin_bULow;
+  assign execute_FixedPointMacPlugin_aSLow = {1'b0,execute_FixedPointMacPlugin_aULow};
+  assign execute_FixedPointMacPlugin_bSLow = {1'b0,execute_FixedPointMacPlugin_bULow};
+  assign execute_FixedPointMacPlugin_aHigh = {execute_FixedPointMacPlugin_a[31],_zz_execute_FixedPointMacPlugin_aHigh};
+  assign execute_FixedPointMacPlugin_bHigh = {execute_FixedPointMacPlugin_b[31],_zz_execute_FixedPointMacPlugin_bHigh};
+  assign execute_FixedPointMacPlugin_isNeg = execute_FixedPointMacPlugin_a[31];
+  assign execute_FixedPointMacPlugin_isZero = ($signed(execute_FixedPointMacPlugin_a) == $signed(32'h0));
+  assign execute_FixedPointMacPlugin_absVal = (execute_FixedPointMacPlugin_isNeg ? _zz_execute_FixedPointMacPlugin_absVal : execute_FixedPointMacPlugin_a);
   always @(*) begin
     execute_FixedPointMacPlugin_clz = 5'h0;
-    if(when_FixedPointMacPlugin_l152) begin
+    if(when_FixedPointMacPlugin_l205) begin
       execute_FixedPointMacPlugin_clz = 5'h1f;
     end
-    if(when_FixedPointMacPlugin_l152_1) begin
+    if(when_FixedPointMacPlugin_l205_1) begin
       execute_FixedPointMacPlugin_clz = 5'h1e;
     end
-    if(when_FixedPointMacPlugin_l152_2) begin
+    if(when_FixedPointMacPlugin_l205_2) begin
       execute_FixedPointMacPlugin_clz = 5'h1d;
     end
-    if(when_FixedPointMacPlugin_l152_3) begin
+    if(when_FixedPointMacPlugin_l205_3) begin
       execute_FixedPointMacPlugin_clz = 5'h1c;
     end
-    if(when_FixedPointMacPlugin_l152_4) begin
+    if(when_FixedPointMacPlugin_l205_4) begin
       execute_FixedPointMacPlugin_clz = 5'h1b;
     end
-    if(when_FixedPointMacPlugin_l152_5) begin
+    if(when_FixedPointMacPlugin_l205_5) begin
       execute_FixedPointMacPlugin_clz = 5'h1a;
     end
-    if(when_FixedPointMacPlugin_l152_6) begin
+    if(when_FixedPointMacPlugin_l205_6) begin
       execute_FixedPointMacPlugin_clz = 5'h19;
     end
-    if(when_FixedPointMacPlugin_l152_7) begin
+    if(when_FixedPointMacPlugin_l205_7) begin
       execute_FixedPointMacPlugin_clz = 5'h18;
     end
-    if(when_FixedPointMacPlugin_l152_8) begin
+    if(when_FixedPointMacPlugin_l205_8) begin
       execute_FixedPointMacPlugin_clz = 5'h17;
     end
-    if(when_FixedPointMacPlugin_l152_9) begin
+    if(when_FixedPointMacPlugin_l205_9) begin
       execute_FixedPointMacPlugin_clz = 5'h16;
     end
-    if(when_FixedPointMacPlugin_l152_10) begin
+    if(when_FixedPointMacPlugin_l205_10) begin
       execute_FixedPointMacPlugin_clz = 5'h15;
     end
-    if(when_FixedPointMacPlugin_l152_11) begin
+    if(when_FixedPointMacPlugin_l205_11) begin
       execute_FixedPointMacPlugin_clz = 5'h14;
     end
-    if(when_FixedPointMacPlugin_l152_12) begin
+    if(when_FixedPointMacPlugin_l205_12) begin
       execute_FixedPointMacPlugin_clz = 5'h13;
     end
-    if(when_FixedPointMacPlugin_l152_13) begin
+    if(when_FixedPointMacPlugin_l205_13) begin
       execute_FixedPointMacPlugin_clz = 5'h12;
     end
-    if(when_FixedPointMacPlugin_l152_14) begin
+    if(when_FixedPointMacPlugin_l205_14) begin
       execute_FixedPointMacPlugin_clz = 5'h11;
     end
-    if(when_FixedPointMacPlugin_l152_15) begin
+    if(when_FixedPointMacPlugin_l205_15) begin
       execute_FixedPointMacPlugin_clz = 5'h10;
     end
-    if(when_FixedPointMacPlugin_l152_16) begin
+    if(when_FixedPointMacPlugin_l205_16) begin
       execute_FixedPointMacPlugin_clz = 5'h0f;
     end
-    if(when_FixedPointMacPlugin_l152_17) begin
+    if(when_FixedPointMacPlugin_l205_17) begin
       execute_FixedPointMacPlugin_clz = 5'h0e;
     end
-    if(when_FixedPointMacPlugin_l152_18) begin
+    if(when_FixedPointMacPlugin_l205_18) begin
       execute_FixedPointMacPlugin_clz = 5'h0d;
     end
-    if(when_FixedPointMacPlugin_l152_19) begin
+    if(when_FixedPointMacPlugin_l205_19) begin
       execute_FixedPointMacPlugin_clz = 5'h0c;
     end
-    if(when_FixedPointMacPlugin_l152_20) begin
+    if(when_FixedPointMacPlugin_l205_20) begin
       execute_FixedPointMacPlugin_clz = 5'h0b;
     end
-    if(when_FixedPointMacPlugin_l152_21) begin
+    if(when_FixedPointMacPlugin_l205_21) begin
       execute_FixedPointMacPlugin_clz = 5'h0a;
     end
-    if(when_FixedPointMacPlugin_l152_22) begin
+    if(when_FixedPointMacPlugin_l205_22) begin
       execute_FixedPointMacPlugin_clz = 5'h09;
     end
-    if(when_FixedPointMacPlugin_l152_23) begin
+    if(when_FixedPointMacPlugin_l205_23) begin
       execute_FixedPointMacPlugin_clz = 5'h08;
     end
-    if(when_FixedPointMacPlugin_l152_24) begin
+    if(when_FixedPointMacPlugin_l205_24) begin
       execute_FixedPointMacPlugin_clz = 5'h07;
     end
-    if(when_FixedPointMacPlugin_l152_25) begin
+    if(when_FixedPointMacPlugin_l205_25) begin
       execute_FixedPointMacPlugin_clz = 5'h06;
     end
-    if(when_FixedPointMacPlugin_l152_26) begin
+    if(when_FixedPointMacPlugin_l205_26) begin
       execute_FixedPointMacPlugin_clz = 5'h05;
     end
-    if(when_FixedPointMacPlugin_l152_27) begin
+    if(when_FixedPointMacPlugin_l205_27) begin
       execute_FixedPointMacPlugin_clz = 5'h04;
     end
-    if(when_FixedPointMacPlugin_l152_28) begin
+    if(when_FixedPointMacPlugin_l205_28) begin
       execute_FixedPointMacPlugin_clz = 5'h03;
     end
-    if(when_FixedPointMacPlugin_l152_29) begin
+    if(when_FixedPointMacPlugin_l205_29) begin
       execute_FixedPointMacPlugin_clz = 5'h02;
     end
-    if(when_FixedPointMacPlugin_l152_30) begin
+    if(when_FixedPointMacPlugin_l205_30) begin
       execute_FixedPointMacPlugin_clz = 5'h01;
     end
-    if(when_FixedPointMacPlugin_l152_31) begin
+    if(when_FixedPointMacPlugin_l205_31) begin
       execute_FixedPointMacPlugin_clz = 5'h0;
     end
   end
 
-  assign when_FixedPointMacPlugin_l152 = execute_FixedPointMacPlugin_absVal[0];
-  assign when_FixedPointMacPlugin_l152_1 = execute_FixedPointMacPlugin_absVal[1];
-  assign when_FixedPointMacPlugin_l152_2 = execute_FixedPointMacPlugin_absVal[2];
-  assign when_FixedPointMacPlugin_l152_3 = execute_FixedPointMacPlugin_absVal[3];
-  assign when_FixedPointMacPlugin_l152_4 = execute_FixedPointMacPlugin_absVal[4];
-  assign when_FixedPointMacPlugin_l152_5 = execute_FixedPointMacPlugin_absVal[5];
-  assign when_FixedPointMacPlugin_l152_6 = execute_FixedPointMacPlugin_absVal[6];
-  assign when_FixedPointMacPlugin_l152_7 = execute_FixedPointMacPlugin_absVal[7];
-  assign when_FixedPointMacPlugin_l152_8 = execute_FixedPointMacPlugin_absVal[8];
-  assign when_FixedPointMacPlugin_l152_9 = execute_FixedPointMacPlugin_absVal[9];
-  assign when_FixedPointMacPlugin_l152_10 = execute_FixedPointMacPlugin_absVal[10];
-  assign when_FixedPointMacPlugin_l152_11 = execute_FixedPointMacPlugin_absVal[11];
-  assign when_FixedPointMacPlugin_l152_12 = execute_FixedPointMacPlugin_absVal[12];
-  assign when_FixedPointMacPlugin_l152_13 = execute_FixedPointMacPlugin_absVal[13];
-  assign when_FixedPointMacPlugin_l152_14 = execute_FixedPointMacPlugin_absVal[14];
-  assign when_FixedPointMacPlugin_l152_15 = execute_FixedPointMacPlugin_absVal[15];
-  assign when_FixedPointMacPlugin_l152_16 = execute_FixedPointMacPlugin_absVal[16];
-  assign when_FixedPointMacPlugin_l152_17 = execute_FixedPointMacPlugin_absVal[17];
-  assign when_FixedPointMacPlugin_l152_18 = execute_FixedPointMacPlugin_absVal[18];
-  assign when_FixedPointMacPlugin_l152_19 = execute_FixedPointMacPlugin_absVal[19];
-  assign when_FixedPointMacPlugin_l152_20 = execute_FixedPointMacPlugin_absVal[20];
-  assign when_FixedPointMacPlugin_l152_21 = execute_FixedPointMacPlugin_absVal[21];
-  assign when_FixedPointMacPlugin_l152_22 = execute_FixedPointMacPlugin_absVal[22];
-  assign when_FixedPointMacPlugin_l152_23 = execute_FixedPointMacPlugin_absVal[23];
-  assign when_FixedPointMacPlugin_l152_24 = execute_FixedPointMacPlugin_absVal[24];
-  assign when_FixedPointMacPlugin_l152_25 = execute_FixedPointMacPlugin_absVal[25];
-  assign when_FixedPointMacPlugin_l152_26 = execute_FixedPointMacPlugin_absVal[26];
-  assign when_FixedPointMacPlugin_l152_27 = execute_FixedPointMacPlugin_absVal[27];
-  assign when_FixedPointMacPlugin_l152_28 = execute_FixedPointMacPlugin_absVal[28];
-  assign when_FixedPointMacPlugin_l152_29 = execute_FixedPointMacPlugin_absVal[29];
-  assign when_FixedPointMacPlugin_l152_30 = execute_FixedPointMacPlugin_absVal[30];
-  assign when_FixedPointMacPlugin_l152_31 = execute_FixedPointMacPlugin_absVal[31];
-  assign execute_FixedPointMacPlugin_normalized = (execute_FixedPointMacPlugin_absVal <<< execute_FixedPointMacPlugin_clz);
+  assign when_FixedPointMacPlugin_l205 = execute_FixedPointMacPlugin_absVal[0];
+  assign when_FixedPointMacPlugin_l205_1 = execute_FixedPointMacPlugin_absVal[1];
+  assign when_FixedPointMacPlugin_l205_2 = execute_FixedPointMacPlugin_absVal[2];
+  assign when_FixedPointMacPlugin_l205_3 = execute_FixedPointMacPlugin_absVal[3];
+  assign when_FixedPointMacPlugin_l205_4 = execute_FixedPointMacPlugin_absVal[4];
+  assign when_FixedPointMacPlugin_l205_5 = execute_FixedPointMacPlugin_absVal[5];
+  assign when_FixedPointMacPlugin_l205_6 = execute_FixedPointMacPlugin_absVal[6];
+  assign when_FixedPointMacPlugin_l205_7 = execute_FixedPointMacPlugin_absVal[7];
+  assign when_FixedPointMacPlugin_l205_8 = execute_FixedPointMacPlugin_absVal[8];
+  assign when_FixedPointMacPlugin_l205_9 = execute_FixedPointMacPlugin_absVal[9];
+  assign when_FixedPointMacPlugin_l205_10 = execute_FixedPointMacPlugin_absVal[10];
+  assign when_FixedPointMacPlugin_l205_11 = execute_FixedPointMacPlugin_absVal[11];
+  assign when_FixedPointMacPlugin_l205_12 = execute_FixedPointMacPlugin_absVal[12];
+  assign when_FixedPointMacPlugin_l205_13 = execute_FixedPointMacPlugin_absVal[13];
+  assign when_FixedPointMacPlugin_l205_14 = execute_FixedPointMacPlugin_absVal[14];
+  assign when_FixedPointMacPlugin_l205_15 = execute_FixedPointMacPlugin_absVal[15];
+  assign when_FixedPointMacPlugin_l205_16 = execute_FixedPointMacPlugin_absVal[16];
+  assign when_FixedPointMacPlugin_l205_17 = execute_FixedPointMacPlugin_absVal[17];
+  assign when_FixedPointMacPlugin_l205_18 = execute_FixedPointMacPlugin_absVal[18];
+  assign when_FixedPointMacPlugin_l205_19 = execute_FixedPointMacPlugin_absVal[19];
+  assign when_FixedPointMacPlugin_l205_20 = execute_FixedPointMacPlugin_absVal[20];
+  assign when_FixedPointMacPlugin_l205_21 = execute_FixedPointMacPlugin_absVal[21];
+  assign when_FixedPointMacPlugin_l205_22 = execute_FixedPointMacPlugin_absVal[22];
+  assign when_FixedPointMacPlugin_l205_23 = execute_FixedPointMacPlugin_absVal[23];
+  assign when_FixedPointMacPlugin_l205_24 = execute_FixedPointMacPlugin_absVal[24];
+  assign when_FixedPointMacPlugin_l205_25 = execute_FixedPointMacPlugin_absVal[25];
+  assign when_FixedPointMacPlugin_l205_26 = execute_FixedPointMacPlugin_absVal[26];
+  assign when_FixedPointMacPlugin_l205_27 = execute_FixedPointMacPlugin_absVal[27];
+  assign when_FixedPointMacPlugin_l205_28 = execute_FixedPointMacPlugin_absVal[28];
+  assign when_FixedPointMacPlugin_l205_29 = execute_FixedPointMacPlugin_absVal[29];
+  assign when_FixedPointMacPlugin_l205_30 = execute_FixedPointMacPlugin_absVal[30];
+  assign when_FixedPointMacPlugin_l205_31 = execute_FixedPointMacPlugin_absVal[31];
+  assign execute_FixedPointMacPlugin_normalized = (execute_FixedPointMacPlugin_rcpAbsReg <<< execute_FixedPointMacPlugin_rcpClzReg);
   assign execute_FixedPointMacPlugin_xNorm = execute_FixedPointMacPlugin_normalized[31 : 16];
   assign execute_FixedPointMacPlugin_lutIdx = execute_FixedPointMacPlugin_xNorm[14 : 7];
   assign execute_FixedPointMacPlugin_y0 = _zz_10_spinal_port0;
   assign execute_FixedPointMacPlugin_xy = (execute_FixedPointMacPlugin_xNorm * execute_FixedPointMacPlugin_y0);
-  assign memory_FixedPointMacPlugin_fxProduct = memory_FX_PRODUCT;
-  assign when_FixedPointMacPlugin_l188 = (memory_IS_FXMACS && memory_arbitration_isFiring);
-  assign when_FixedPointMacPlugin_l195 = (memory_IS_FXMACR && memory_arbitration_isFiring);
-  assign _zz_decode_RS2_5 = (memory_RCP_Y0 * _zz__zz_decode_RS2_5[31 : 16]);
-  assign _zz_decode_RS2_6 = ((5'h1e < memory_RCP_SHIFT) ? _zz__zz_decode_RS2_6 : _zz__zz_decode_RS2_6_1);
-  assign _zz_decode_RS2_7 = (_zz_decode_RS2_6[31] ? 32'h7fffffff : _zz_decode_RS2_6);
+  assign execute_FixedPointMacPlugin_correction = ((~ execute_FixedPointMacPlugin_rcpXYReg) + 32'h00000001);
+  assign execute_FixedPointMacPlugin_corrHi = execute_FixedPointMacPlugin_correction[31 : 16];
+  assign execute_FixedPointMacPlugin_y1_full = (execute_FixedPointMacPlugin_rcpY0Reg * execute_FixedPointMacPlugin_corrHi);
+  always @(*) begin
+    _zz_execute_RCP_Y1 = 32'h0;
+    if(when_FixedPointMacPlugin_l229) begin
+      if(!when_FixedPointMacPlugin_l230) begin
+        if(!when_FixedPointMacPlugin_l238) begin
+          _zz_execute_RCP_Y1 = execute_FixedPointMacPlugin_y1_full;
+        end
+      end
+    end
+  end
+
+  always @(*) begin
+    _zz_execute_RCP_SHIFT = 5'h0;
+    if(when_FixedPointMacPlugin_l229) begin
+      if(!when_FixedPointMacPlugin_l230) begin
+        if(!when_FixedPointMacPlugin_l238) begin
+          _zz_execute_RCP_SHIFT = execute_FixedPointMacPlugin_rcpClzReg;
+        end
+      end
+    end
+  end
+
+  always @(*) begin
+    _zz_execute_RCP_SIGN = 1'b0;
+    if(when_FixedPointMacPlugin_l229) begin
+      if(!when_FixedPointMacPlugin_l230) begin
+        if(!when_FixedPointMacPlugin_l238) begin
+          _zz_execute_RCP_SIGN = execute_FixedPointMacPlugin_rcpSignReg;
+        end
+      end
+    end
+  end
+
+  always @(*) begin
+    _zz_execute_RCP_ZERO = 1'b0;
+    if(when_FixedPointMacPlugin_l229) begin
+      if(!when_FixedPointMacPlugin_l230) begin
+        if(!when_FixedPointMacPlugin_l238) begin
+          _zz_execute_RCP_ZERO = execute_FixedPointMacPlugin_rcpZeroReg;
+        end
+      end
+    end
+  end
+
+  assign when_FixedPointMacPlugin_l229 = (execute_arbitration_isValid && execute_IS_FXRCP);
+  assign when_FixedPointMacPlugin_l230 = (execute_FixedPointMacPlugin_rcpPhase == 2'b00);
+  assign when_FixedPointMacPlugin_l238 = (execute_FixedPointMacPlugin_rcpPhase == 2'b01);
+  assign when_FixedPointMacPlugin_l254 = ((! execute_arbitration_isStuck) || execute_arbitration_removeIt);
+  assign _zz_decode_RS2_5 = execute_RS1;
+  assign _zz_decode_RS2_6 = execute_RS2;
+  assign memory_FixedPointMacPlugin_ll = memory_FX_MUL_LL;
+  assign memory_FixedPointMacPlugin_lh = memory_FX_MUL_LH;
+  assign memory_FixedPointMacPlugin_hl = memory_FX_MUL_HL;
+  assign memory_FixedPointMacPlugin_hh = memory_FX_MUL_HH;
+  assign memory_FixedPointMacPlugin_fxSum = ($signed(_zz_memory_FixedPointMacPlugin_fxSum) + $signed(_zz_memory_FixedPointMacPlugin_fxSum_6));
+  assign memory_FixedPointMacPlugin_fxProduct = memory_FixedPointMacPlugin_fxSum[31 : 0];
+  assign when_FixedPointMacPlugin_l293 = (memory_IS_FXMACS && memory_arbitration_isFiring);
+  assign when_FixedPointMacPlugin_l300 = (memory_IS_FXMACR && memory_arbitration_isFiring);
+  assign _zz_decode_RS2_7 = ((5'h1e < memory_RCP_SHIFT) ? _zz__zz_decode_RS2_7 : _zz__zz_decode_RS2_7_1);
+  assign _zz_decode_RS2_8 = (_zz_decode_RS2_7[31] ? 32'h7fffffff : _zz_decode_RS2_7);
   assign when_Pipeline_l124 = (! execute_arbitration_isStuck);
   assign when_Pipeline_l124_1 = (! memory_arbitration_isStuck);
   assign when_Pipeline_l124_2 = ((! writeBack_arbitration_isStuck) && (! CsrPlugin_exceptionPortCtrl_exceptionValids_writeBack));
@@ -6286,30 +6487,30 @@ module VexRiscv (
   assign when_Pipeline_l124_63 = (! execute_arbitration_isStuck);
   assign when_Pipeline_l124_64 = (! memory_arbitration_isStuck);
   assign when_Pipeline_l124_65 = (! execute_arbitration_isStuck);
-  assign when_Pipeline_l124_66 = (! memory_arbitration_isStuck);
-  assign when_Pipeline_l124_67 = (! writeBack_arbitration_isStuck);
-  assign when_Pipeline_l124_68 = (! execute_arbitration_isStuck);
+  assign when_Pipeline_l124_66 = (! execute_arbitration_isStuck);
+  assign when_Pipeline_l124_67 = (! memory_arbitration_isStuck);
+  assign when_Pipeline_l124_68 = (! writeBack_arbitration_isStuck);
   assign when_Pipeline_l124_69 = (! execute_arbitration_isStuck);
   assign when_Pipeline_l124_70 = (! execute_arbitration_isStuck);
   assign when_Pipeline_l124_71 = (! execute_arbitration_isStuck);
   assign when_Pipeline_l124_72 = (! execute_arbitration_isStuck);
   assign when_Pipeline_l124_73 = (! execute_arbitration_isStuck);
-  assign when_Pipeline_l124_74 = (! memory_arbitration_isStuck);
-  assign when_Pipeline_l124_75 = (! writeBack_arbitration_isStuck);
-  assign when_Pipeline_l124_76 = (! execute_arbitration_isStuck);
-  assign when_Pipeline_l124_77 = (! memory_arbitration_isStuck);
-  assign when_Pipeline_l124_78 = (! writeBack_arbitration_isStuck);
-  assign when_Pipeline_l124_79 = (! memory_arbitration_isStuck);
-  assign when_Pipeline_l124_80 = (! writeBack_arbitration_isStuck);
-  assign when_Pipeline_l124_81 = (! memory_arbitration_isStuck);
-  assign when_Pipeline_l124_82 = (! writeBack_arbitration_isStuck);
-  assign when_Pipeline_l124_83 = (! memory_arbitration_isStuck);
+  assign when_Pipeline_l124_74 = (! execute_arbitration_isStuck);
+  assign when_Pipeline_l124_75 = (! memory_arbitration_isStuck);
+  assign when_Pipeline_l124_76 = (! writeBack_arbitration_isStuck);
+  assign when_Pipeline_l124_77 = (! execute_arbitration_isStuck);
+  assign when_Pipeline_l124_78 = (! memory_arbitration_isStuck);
+  assign when_Pipeline_l124_79 = (! writeBack_arbitration_isStuck);
+  assign when_Pipeline_l124_80 = (! memory_arbitration_isStuck);
+  assign when_Pipeline_l124_81 = (! writeBack_arbitration_isStuck);
+  assign when_Pipeline_l124_82 = (! memory_arbitration_isStuck);
+  assign when_Pipeline_l124_83 = (! writeBack_arbitration_isStuck);
   assign when_Pipeline_l124_84 = (! memory_arbitration_isStuck);
   assign when_Pipeline_l124_85 = (! memory_arbitration_isStuck);
   assign when_Pipeline_l124_86 = (! memory_arbitration_isStuck);
   assign when_Pipeline_l124_87 = (! memory_arbitration_isStuck);
-  assign when_Pipeline_l124_88 = (! writeBack_arbitration_isStuck);
-  assign when_Pipeline_l124_89 = (! memory_arbitration_isStuck);
+  assign when_Pipeline_l124_88 = (! memory_arbitration_isStuck);
+  assign when_Pipeline_l124_89 = (! writeBack_arbitration_isStuck);
   assign when_Pipeline_l124_90 = (! memory_arbitration_isStuck);
   assign when_Pipeline_l124_91 = (! memory_arbitration_isStuck);
   assign when_Pipeline_l124_92 = (! memory_arbitration_isStuck);
@@ -6317,7 +6518,10 @@ module VexRiscv (
   assign when_Pipeline_l124_94 = (! memory_arbitration_isStuck);
   assign when_Pipeline_l124_95 = (! memory_arbitration_isStuck);
   assign when_Pipeline_l124_96 = (! memory_arbitration_isStuck);
-  assign when_Pipeline_l124_97 = (! writeBack_arbitration_isStuck);
+  assign when_Pipeline_l124_97 = (! memory_arbitration_isStuck);
+  assign when_Pipeline_l124_98 = (! memory_arbitration_isStuck);
+  assign when_Pipeline_l124_99 = (! memory_arbitration_isStuck);
+  assign when_Pipeline_l124_100 = (! writeBack_arbitration_isStuck);
   assign decode_arbitration_isFlushed = ((|{writeBack_arbitration_flushNext,{memory_arbitration_flushNext,execute_arbitration_flushNext}}) || (|{writeBack_arbitration_flushIt,{memory_arbitration_flushIt,{execute_arbitration_flushIt,decode_arbitration_flushIt}}}));
   assign execute_arbitration_isFlushed = ((|{writeBack_arbitration_flushNext,memory_arbitration_flushNext}) || (|{writeBack_arbitration_flushIt,{memory_arbitration_flushIt,execute_arbitration_flushIt}}));
   assign memory_arbitration_isFlushed = ((|writeBack_arbitration_flushNext) || (|{writeBack_arbitration_flushIt,memory_arbitration_flushIt}));
@@ -6513,6 +6717,7 @@ module VexRiscv (
       IBusCachedPlugin_injector_nextPcCalc_valids_3 <= 1'b0;
       IBusCachedPlugin_rspCounter <= 32'h0;
       io_mem_cmd_rValid <= 1'b0;
+      dBus_rsp_regNext_valid <= 1'b0;
       DBusCachedPlugin_rspCounter <= 32'h0;
       _zz_9 <= 1'b1;
       memory_DivPlugin_div_counter_value <= 6'h0;
@@ -6546,6 +6751,7 @@ module VexRiscv (
       decode_FpuPlugin_forked <= 1'b0;
       writeBack_FpuPlugin_commit_rValidN <= 1'b1;
       _zz_decode_RS2_4 <= 48'h0;
+      execute_FixedPointMacPlugin_rcpPhase <= 2'b00;
       execute_arbitration_isValid <= 1'b0;
       memory_arbitration_isValid <= 1'b0;
       writeBack_arbitration_isValid <= 1'b0;
@@ -6651,6 +6857,7 @@ module VexRiscv (
       if(dataCache_1_io_mem_cmd_ready) begin
         io_mem_cmd_rValid <= dataCache_1_io_mem_cmd_valid;
       end
+      dBus_rsp_regNext_valid <= dBus_rsp_valid;
       if(dBus_rsp_valid) begin
         DBusCachedPlugin_rspCounter <= (DBusCachedPlugin_rspCounter + 32'h00000001);
       end
@@ -6787,19 +6994,31 @@ module VexRiscv (
       if(writeBack_FpuPlugin_commit_s2mPipe_ready) begin
         writeBack_FpuPlugin_commit_rValidN <= 1'b1;
       end
-      if(when_FixedPointMacPlugin_l188) begin
+      if(when_FixedPointMacPlugin_l229) begin
+        if(when_FixedPointMacPlugin_l230) begin
+          execute_FixedPointMacPlugin_rcpPhase <= 2'b01;
+        end else begin
+          if(when_FixedPointMacPlugin_l238) begin
+            execute_FixedPointMacPlugin_rcpPhase <= 2'b10;
+          end
+        end
+      end
+      if(when_FixedPointMacPlugin_l254) begin
+        execute_FixedPointMacPlugin_rcpPhase <= 2'b00;
+      end
+      if(when_FixedPointMacPlugin_l293) begin
         _zz_decode_RS2_4 <= ($signed(_zz_decode_RS2_4) + $signed(_zz__zz_decode_RS2_4));
       end
-      if(when_FixedPointMacPlugin_l195) begin
+      if(when_FixedPointMacPlugin_l300) begin
         _zz_decode_RS2_4 <= 48'h0;
       end
-      if(when_Pipeline_l124_73) begin
+      if(when_Pipeline_l124_74) begin
         decode_to_execute_FPU_FORKED <= _zz_decode_to_execute_FPU_FORKED;
       end
-      if(when_Pipeline_l124_74) begin
+      if(when_Pipeline_l124_75) begin
         execute_to_memory_FPU_FORKED <= _zz_execute_to_memory_FPU_FORKED;
       end
-      if(when_Pipeline_l124_75) begin
+      if(when_Pipeline_l124_76) begin
         memory_to_writeBack_FPU_FORKED <= _zz_memory_to_writeBack_FPU_FORKED;
       end
       if(when_Pipeline_l151) begin
@@ -6942,6 +7161,9 @@ module VexRiscv (
       io_mem_cmd_rData_size <= dataCache_1_io_mem_cmd_payload_size;
       io_mem_cmd_rData_last <= dataCache_1_io_mem_cmd_payload_last;
     end
+    dBus_rsp_regNext_payload_last <= dBus_rsp_payload_last;
+    dBus_rsp_regNext_payload_data <= dBus_rsp_payload_data;
+    dBus_rsp_regNext_payload_error <= dBus_rsp_payload_error;
     if(when_MulDivIterativePlugin_l126) begin
       memory_DivPlugin_div_done <= 1'b1;
     end
@@ -7011,6 +7233,19 @@ module VexRiscv (
       writeBack_FpuPlugin_commit_rData_rd <= writeBack_FpuPlugin_commit_payload_rd;
       writeBack_FpuPlugin_commit_rData_write <= writeBack_FpuPlugin_commit_payload_write;
       writeBack_FpuPlugin_commit_rData_value <= writeBack_FpuPlugin_commit_payload_value;
+    end
+    if(when_FixedPointMacPlugin_l229) begin
+      if(when_FixedPointMacPlugin_l230) begin
+        execute_FixedPointMacPlugin_rcpAbsReg <= execute_FixedPointMacPlugin_absVal;
+        execute_FixedPointMacPlugin_rcpClzReg <= execute_FixedPointMacPlugin_clz;
+        execute_FixedPointMacPlugin_rcpSignReg <= execute_FixedPointMacPlugin_isNeg;
+        execute_FixedPointMacPlugin_rcpZeroReg <= execute_FixedPointMacPlugin_isZero;
+      end else begin
+        if(when_FixedPointMacPlugin_l238) begin
+          execute_FixedPointMacPlugin_rcpY0Reg <= execute_FixedPointMacPlugin_y0;
+          execute_FixedPointMacPlugin_rcpXYReg <= execute_FixedPointMacPlugin_xy;
+        end
+      end
     end
     if(when_Pipeline_l124) begin
       decode_to_execute_PC <= decode_PC;
@@ -7210,93 +7445,102 @@ module VexRiscv (
       execute_to_memory_IS_FXRCP <= execute_IS_FXRCP;
     end
     if(when_Pipeline_l124_65) begin
-      decode_to_execute_RS1 <= decode_RS1;
+      decode_to_execute_IS_FXCLAMP <= decode_IS_FXCLAMP;
     end
     if(when_Pipeline_l124_66) begin
-      execute_to_memory_RS1 <= _zz_execute_to_memory_RS1;
+      decode_to_execute_RS1 <= decode_RS1;
     end
     if(when_Pipeline_l124_67) begin
-      memory_to_writeBack_RS1 <= memory_RS1;
+      execute_to_memory_RS1 <= _zz_execute_to_memory_RS1;
     end
     if(when_Pipeline_l124_68) begin
-      decode_to_execute_RS2 <= decode_RS2;
+      memory_to_writeBack_RS1 <= memory_RS1;
     end
     if(when_Pipeline_l124_69) begin
-      decode_to_execute_SRC2_FORCE_ZERO <= decode_SRC2_FORCE_ZERO;
+      decode_to_execute_RS2 <= decode_RS2;
     end
     if(when_Pipeline_l124_70) begin
-      decode_to_execute_PREDICTION_HAD_BRANCHED1 <= decode_PREDICTION_HAD_BRANCHED1;
+      decode_to_execute_SRC2_FORCE_ZERO <= decode_SRC2_FORCE_ZERO;
     end
     if(when_Pipeline_l124_71) begin
-      decode_to_execute_CSR_WRITE_OPCODE <= decode_CSR_WRITE_OPCODE;
+      decode_to_execute_PREDICTION_HAD_BRANCHED1 <= decode_PREDICTION_HAD_BRANCHED1;
     end
     if(when_Pipeline_l124_72) begin
+      decode_to_execute_CSR_WRITE_OPCODE <= decode_CSR_WRITE_OPCODE;
+    end
+    if(when_Pipeline_l124_73) begin
       decode_to_execute_CSR_READ_OPCODE <= decode_CSR_READ_OPCODE;
     end
-    if(when_Pipeline_l124_76) begin
+    if(when_Pipeline_l124_77) begin
       decode_to_execute_FPU_COMMIT_LOAD <= decode_FPU_COMMIT_LOAD;
     end
-    if(when_Pipeline_l124_77) begin
+    if(when_Pipeline_l124_78) begin
       execute_to_memory_FPU_COMMIT_LOAD <= execute_FPU_COMMIT_LOAD;
     end
-    if(when_Pipeline_l124_78) begin
+    if(when_Pipeline_l124_79) begin
       memory_to_writeBack_FPU_COMMIT_LOAD <= memory_FPU_COMMIT_LOAD;
     end
-    if(when_Pipeline_l124_79) begin
+    if(when_Pipeline_l124_80) begin
       execute_to_memory_MEMORY_STORE_DATA_RF <= execute_MEMORY_STORE_DATA_RF;
     end
-    if(when_Pipeline_l124_80) begin
+    if(when_Pipeline_l124_81) begin
       memory_to_writeBack_MEMORY_STORE_DATA_RF <= memory_MEMORY_STORE_DATA_RF;
     end
-    if(when_Pipeline_l124_81) begin
+    if(when_Pipeline_l124_82) begin
       execute_to_memory_REGFILE_WRITE_DATA <= _zz_decode_RS2;
     end
-    if(when_Pipeline_l124_82) begin
+    if(when_Pipeline_l124_83) begin
       memory_to_writeBack_REGFILE_WRITE_DATA <= _zz_decode_RS2_1;
     end
-    if(when_Pipeline_l124_83) begin
+    if(when_Pipeline_l124_84) begin
       execute_to_memory_SHIFT_RIGHT <= execute_SHIFT_RIGHT;
     end
-    if(when_Pipeline_l124_84) begin
+    if(when_Pipeline_l124_85) begin
       execute_to_memory_MUL_LL <= execute_MUL_LL;
     end
-    if(when_Pipeline_l124_85) begin
+    if(when_Pipeline_l124_86) begin
       execute_to_memory_MUL_LH <= execute_MUL_LH;
     end
-    if(when_Pipeline_l124_86) begin
+    if(when_Pipeline_l124_87) begin
       execute_to_memory_MUL_HL <= execute_MUL_HL;
     end
-    if(when_Pipeline_l124_87) begin
+    if(when_Pipeline_l124_88) begin
       execute_to_memory_MUL_HH <= execute_MUL_HH;
     end
-    if(when_Pipeline_l124_88) begin
+    if(when_Pipeline_l124_89) begin
       memory_to_writeBack_MUL_HH <= memory_MUL_HH;
     end
-    if(when_Pipeline_l124_89) begin
+    if(when_Pipeline_l124_90) begin
       execute_to_memory_BRANCH_DO <= execute_BRANCH_DO;
     end
-    if(when_Pipeline_l124_90) begin
+    if(when_Pipeline_l124_91) begin
       execute_to_memory_BRANCH_CALC <= execute_BRANCH_CALC;
     end
-    if(when_Pipeline_l124_91) begin
-      execute_to_memory_FX_PRODUCT <= execute_FX_PRODUCT;
-    end
     if(when_Pipeline_l124_92) begin
-      execute_to_memory_RCP_Y0 <= execute_RCP_Y0;
+      execute_to_memory_FX_MUL_LL <= execute_FX_MUL_LL;
     end
     if(when_Pipeline_l124_93) begin
-      execute_to_memory_RCP_XY <= execute_RCP_XY;
+      execute_to_memory_FX_MUL_LH <= execute_FX_MUL_LH;
     end
     if(when_Pipeline_l124_94) begin
-      execute_to_memory_RCP_SHIFT <= execute_RCP_SHIFT;
+      execute_to_memory_FX_MUL_HL <= execute_FX_MUL_HL;
     end
     if(when_Pipeline_l124_95) begin
-      execute_to_memory_RCP_SIGN <= execute_RCP_SIGN;
+      execute_to_memory_FX_MUL_HH <= execute_FX_MUL_HH;
     end
     if(when_Pipeline_l124_96) begin
-      execute_to_memory_RCP_ZERO <= execute_RCP_ZERO;
+      execute_to_memory_RCP_Y1 <= execute_RCP_Y1;
     end
     if(when_Pipeline_l124_97) begin
+      execute_to_memory_RCP_SHIFT <= execute_RCP_SHIFT;
+    end
+    if(when_Pipeline_l124_98) begin
+      execute_to_memory_RCP_SIGN <= execute_RCP_SIGN;
+    end
+    if(when_Pipeline_l124_99) begin
+      execute_to_memory_RCP_ZERO <= execute_RCP_ZERO;
+    end
+    if(when_Pipeline_l124_100) begin
       memory_to_writeBack_MUL_LOW <= memory_MUL_LOW;
     end
     if(when_CsrPlugin_l1669) begin
