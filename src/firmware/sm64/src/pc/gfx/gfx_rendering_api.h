@@ -24,14 +24,22 @@ struct GfxRenderingAPI {
     void (*set_viewport)(int x, int y, int width, int height);
     void (*set_scissor)(int x, int y, int width, int height);
     void (*set_use_alpha)(bool use_alpha);
+#ifdef TARGET_POCKET
+    void (*draw_triangles)(int32_t buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris);
+#else
     void (*draw_triangles)(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris);
+#endif
     void (*init)(void);
     void (*on_resize)(void);
     void (*start_frame)(void);
     void (*end_frame)(void);
     void (*finish_render)(void);
     void (*fill_rect)(int x0, int y0, int x1, int y1, const uint8_t *rgba); // optional; fill 2d rect with color
+#ifdef TARGET_POCKET
+    void (*tex_rect)(int x0, int y0, int x1, int y1, const int32_t u0, const int32_t v0, const int32_t dudx, const int32_t dvdy, const uint8_t *rgba);
+#else
     void (*tex_rect)(int x0, int y0, int x1, int y1, const float u0, const float v0, const float dudx, const float dvdy, const uint8_t *rgba);
+#endif
     void (*set_fog_color)(const uint8_t *rgb); // optional; set global fog color
     void (*shutdown)(void); // optional
 };

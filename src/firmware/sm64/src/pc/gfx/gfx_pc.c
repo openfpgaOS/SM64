@@ -23,10 +23,19 @@
 extern void term_printf(const char *fmt, ...);
 #endif
 
-// DIAGNOSTIC: Pure float rendering pipeline on TARGET_POCKET.
-// Uses float for ALL rendering operations (rspv_t = float).
-// Only the Mtx loading boundary converts fx32 → float.
-// This isolates whether geometry distortion is caused by the fx32 pipeline.
+#ifdef TARGET_POCKET
+typedef fx32 rspv_t;
+#define RSPV_ONE       FX32_ONE
+#define RSPV_ZERO      0
+#define RSPV_HALF      FX32_HALF
+#define RSPV(f)        FX32_FROM_FLOAT(f)
+#define RSPV_FROM_INT(i) FX32_FROM_INT(i)
+#define RSPV_TO_INT(v)   FX32_TO_INT(v)
+#define RSPV_TO_FLOAT(v) FX32_TO_FLOAT(v)
+#define RSPV_MUL(a,b)  fx32_mul(a,b)
+#define RSPV_RCP(a)    fx32_rcp(a)
+#define RSPV_DIV(a,b)  fx32_div(a,b)
+#else
 typedef float rspv_t;
 #define RSPV_ONE     1.0f
 #define RSPV_ZERO    0.0f
@@ -38,6 +47,7 @@ typedef float rspv_t;
 #define RSPV_MUL(a,b) ((a)*(b))
 #define RSPV_RCP(a)    (1.0f/(a))
 #define RSPV_DIV(a,b)  ((a)/(b))
+#endif
 
 #define SUPPORT_CHECK(x) assert(x)
 
@@ -70,7 +80,10 @@ typedef float rspv_t;
 #define GFX_W_PREMULT 1
 #endif
 
-#ifdef GFX_DONT_SCALE_COLORS
+#ifdef TARGET_POCKET
+#define GFX_COLOR_ONE   FX32_FROM_INT(255)
+#define GFX_COLOR_CONVERT(x) FX32_FROM_INT(x)
+#elif defined(GFX_DONT_SCALE_COLORS)
 #define GFX_COLOR_ONE 255.f
 #define GFX_COLOR_CONVERT(x) ((float)(x))
 #else
@@ -79,7 +92,11 @@ typedef float rspv_t;
 #endif
 
 #ifdef GFX_W_PREMULT
-#define GFX_OUT_PROP(x) RSPV_MUL((x), w_inv)
+  #ifdef TARGET_POCKET
+    #define GFX_OUT_PROP(x) fx32_mul((x), w_inv)
+  #else
+    #define GFX_OUT_PROP(x) RSPV_MUL((x), w_inv)
+  #endif
 #else
 #define GFX_OUT_PROP(x) (x)
 #endif
@@ -216,7 +233,11 @@ static struct {
 static int vtx_dump_count;  // counts gfx_sp_vertex calls, dump first few
 #endif
 
-static rspv_t buf_vbo[MAX_BUFFERED * (26 * 3)]; // 3 vertices in a triangle and 26 values per vtx
+#ifdef TARGET_POCKET
+static int32_t buf_vbo[MAX_BUFFERED * (26 * 3)]; // 3 vertices in a triangle and 26 values per vtx
+#else
+static float buf_vbo[MAX_BUFFERED * (26 * 3)]; // 3 vertices in a triangle and 26 values per vtx
+#endif
 static size_t buf_vbo_len;
 static size_t buf_vbo_num_tris;
 
@@ -598,23 +619,39 @@ static inline void calculate_normal_dir(const Light_t *light, rspv_t coeffs[3]) 
         light->dir[2] / 127.0f
     };
     float fcoeffs[3];
-    // rspv_t is float — modelview matrix is already float, direct access
+#ifdef TARGET_POCKET
+    // rspv_t is fx32 — convert modelview matrix to float for transposed multiply
+    float fmv[4][4];
+    const fx32 *src = (const fx32 *)rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1];
+    for (int i = 0; i < 16; i++)
+        ((float *)fmv)[i] = FX32_TO_FLOAT(src[i]);
+    gfx_transposed_matrix_mul(fcoeffs, light_dir, (const float (*)[4])fmv);
+#else
     float (*mv)[4] = (float (*)[4])rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1];
     gfx_transposed_matrix_mul(fcoeffs, light_dir, mv);
+#endif
     gfx_normalize_vector(fcoeffs);
-    coeffs[0] = fcoeffs[0];
-    coeffs[1] = fcoeffs[1];
-    coeffs[2] = fcoeffs[2];
+    coeffs[0] = RSPV(fcoeffs[0]);
+    coeffs[1] = RSPV(fcoeffs[1]);
+    coeffs[2] = RSPV(fcoeffs[2]);
 }
 
 static inline void gfx_matrix_mul_inplace(const rspv_t (*restrict a)[4], rspv_t (*restrict res)[4]) {
     rspv_t tmp[4][4];
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
+#ifdef TARGET_POCKET
+            fx32_mac(a[i][0], res[0][j]);
+            fx32_mac(a[i][1], res[1][j]);
+            fx32_mac(a[i][2], res[2][j]);
+            fx32_mac(a[i][3], res[3][j]);
+            tmp[i][j] = fx32_mac_read();
+#else
             tmp[i][j] = a[i][0] * res[0][j] +
                         a[i][1] * res[1][j] +
                         a[i][2] * res[2][j] +
                         a[i][3] * res[3][j];
+#endif
         }
     }
     memcpy(res, tmp, sizeof(tmp));
@@ -623,10 +660,18 @@ static inline void gfx_matrix_mul_inplace(const rspv_t (*restrict a)[4], rspv_t 
 static inline void gfx_matrix_mul(rspv_t (*restrict res)[4], const rspv_t (*restrict a)[4], const rspv_t (*restrict b)[4]) {
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
+#ifdef TARGET_POCKET
+            fx32_mac(a[i][0], b[0][j]);
+            fx32_mac(a[i][1], b[1][j]);
+            fx32_mac(a[i][2], b[2][j]);
+            fx32_mac(a[i][3], b[3][j]);
+            res[i][j] = fx32_mac_read();
+#else
             res[i][j] = a[i][0] * b[0][j] +
                         a[i][1] * b[1][j] +
                         a[i][2] * b[2][j] +
                         a[i][3] * b[3][j];
+#endif
         }
     }
 }
@@ -652,9 +697,8 @@ static void gfx_sp_matrix(uint8_t parameters, const int32_t *addr) {
         }
     }
 #elif defined(TARGET_POCKET)
-    // DIAGNOSTIC: Mtx contains raw Q16.16 (fx32) values — convert to float
-    for (int i = 0; i < 16; i++)
-        ((float *)matrix)[i] = (float)addr[i] / 65536.0f;
+    // Mtx contains raw Q16.16 (fx32) values — load directly
+    memcpy(matrix, addr, sizeof(matrix));
 #else
     // For a modified GBI where fixed point values are replaced with floats
     memcpy(matrix, addr, sizeof(matrix));
@@ -702,12 +746,43 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         const Vtx_tn *vn = &vertices[i].n;
         struct LoadedVertex *d = &rsp.loaded_vertices[dest_index];
 
+#ifdef TARGET_POCKET
+        // v->ob[] are float (GBI_FLOATS) but contain integer positions
+        const fx32 vx = FX32_FROM_FLOAT(v->ob[0]);
+        const fx32 vy = FX32_FROM_FLOAT(v->ob[1]);
+        const fx32 vz = FX32_FROM_FLOAT(v->ob[2]);
+
+        fx32_mac(vx, rsp.MP_matrix[0][0]);
+        fx32_mac(vy, rsp.MP_matrix[1][0]);
+        fx32_mac(vz, rsp.MP_matrix[2][0]);
+        fx32_mac(FX32_ONE, rsp.MP_matrix[3][0]);
+        rspv_t x = fx32_mac_read();
+
+        fx32_mac(vx, rsp.MP_matrix[0][1]);
+        fx32_mac(vy, rsp.MP_matrix[1][1]);
+        fx32_mac(vz, rsp.MP_matrix[2][1]);
+        fx32_mac(FX32_ONE, rsp.MP_matrix[3][1]);
+        rspv_t y = fx32_mac_read();
+
+        fx32_mac(vx, rsp.MP_matrix[0][2]);
+        fx32_mac(vy, rsp.MP_matrix[1][2]);
+        fx32_mac(vz, rsp.MP_matrix[2][2]);
+        fx32_mac(FX32_ONE, rsp.MP_matrix[3][2]);
+        rspv_t z = fx32_mac_read();
+
+        fx32_mac(vx, rsp.MP_matrix[0][3]);
+        fx32_mac(vy, rsp.MP_matrix[1][3]);
+        fx32_mac(vz, rsp.MP_matrix[2][3]);
+        fx32_mac(FX32_ONE, rsp.MP_matrix[3][3]);
+        rspv_t w = fx32_mac_read();
+        // Pocket is always 4:3, no aspect ratio adjustment needed
+#else
         float x = v->ob[0] * rsp.MP_matrix[0][0] + v->ob[1] * rsp.MP_matrix[1][0] + v->ob[2] * rsp.MP_matrix[2][0] + rsp.MP_matrix[3][0];
         float y = v->ob[0] * rsp.MP_matrix[0][1] + v->ob[1] * rsp.MP_matrix[1][1] + v->ob[2] * rsp.MP_matrix[2][1] + rsp.MP_matrix[3][1];
         float z = v->ob[0] * rsp.MP_matrix[0][2] + v->ob[1] * rsp.MP_matrix[1][2] + v->ob[2] * rsp.MP_matrix[2][2] + rsp.MP_matrix[3][2];
         float w = v->ob[0] * rsp.MP_matrix[0][3] + v->ob[1] * rsp.MP_matrix[1][3] + v->ob[2] * rsp.MP_matrix[2][3] + rsp.MP_matrix[3][3];
-
         x = gfx_adjust_x_for_aspect_ratio(x);
+#endif
 
         short U = v->tc[0] * rsp.texture_scaling_factor.s >> 16;
         short V = v->tc[1] * rsp.texture_scaling_factor.t >> 16;
@@ -730,9 +805,9 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
 
             for (int i = 0; i < rsp.current_num_lights - 1; i++) {
                 float intensity = 0;
-                intensity += vn->n[0] * rsp.current_lights_coeffs[i][0];
-                intensity += vn->n[1] * rsp.current_lights_coeffs[i][1];
-                intensity += vn->n[2] * rsp.current_lights_coeffs[i][2];
+                intensity += vn->n[0] * RSPV_TO_FLOAT(rsp.current_lights_coeffs[i][0]);
+                intensity += vn->n[1] * RSPV_TO_FLOAT(rsp.current_lights_coeffs[i][1]);
+                intensity += vn->n[2] * RSPV_TO_FLOAT(rsp.current_lights_coeffs[i][2]);
                 intensity /= 127.0f;
                 if (intensity > 0.0f) {
                     r += intensity * rsp.current_lights[i].col[0];
@@ -747,12 +822,12 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
 
             if (rsp.geometry_mode & G_TEXTURE_GEN) {
                 float dotx = 0, doty = 0;
-                dotx += vn->n[0] * rsp.current_lookat_coeffs[0][0];
-                dotx += vn->n[1] * rsp.current_lookat_coeffs[0][1];
-                dotx += vn->n[2] * rsp.current_lookat_coeffs[0][2];
-                doty += vn->n[0] * rsp.current_lookat_coeffs[1][0];
-                doty += vn->n[1] * rsp.current_lookat_coeffs[1][1];
-                doty += vn->n[2] * rsp.current_lookat_coeffs[1][2];
+                dotx += vn->n[0] * RSPV_TO_FLOAT(rsp.current_lookat_coeffs[0][0]);
+                dotx += vn->n[1] * RSPV_TO_FLOAT(rsp.current_lookat_coeffs[0][1]);
+                dotx += vn->n[2] * RSPV_TO_FLOAT(rsp.current_lookat_coeffs[0][2]);
+                doty += vn->n[0] * RSPV_TO_FLOAT(rsp.current_lookat_coeffs[1][0]);
+                doty += vn->n[1] * RSPV_TO_FLOAT(rsp.current_lookat_coeffs[1][1]);
+                doty += vn->n[2] * RSPV_TO_FLOAT(rsp.current_lookat_coeffs[1][2]);
 
                 U = (int32_t)((dotx / 127.0f + 1.0f) / 4.0f * rsp.texture_scaling_factor.s);
                 V = (int32_t)((doty / 127.0f + 1.0f) / 4.0f * rsp.texture_scaling_factor.t);
@@ -781,9 +856,17 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         d->w = w;
 
         if (configEnableFog && (rsp.geometry_mode & G_FOG)) {
-            float winv = (w == 0.f) ? 1.f / 0.001f : 1.f / w;
+#ifdef TARGET_POCKET
+            float wf = FX32_TO_FLOAT(w);
+            float zf = FX32_TO_FLOAT(z);
+            float winv = (wf == 0.f) ? 1000.f : 1.f / wf;
+#else
+            float wf = w;
+            float zf = z;
+            float winv = (wf == 0.f) ? 1.f / 0.001f : 1.f / wf;
+#endif
             if (winv < 0.0f) winv = 32767.0f;
-            float fog_z = z * winv * rsp.fog_mul + rsp.fog_offset;
+            float fog_z = zf * winv * rsp.fog_mul + rsp.fog_offset;
             int fog_i = (int)fog_z;
             d->color.a = (fog_i < 0) ? 0 : (fog_i > 255) ? 255 : fog_i;
         } else {
@@ -908,12 +991,22 @@ static inline void gfx_push_triangle(const struct LoadedVertex *restrict v1, con
 
     for (int i = 0; i < 3; i++) {
 #ifdef GFX_W_PREMULT
+  #ifdef TARGET_POCKET
+        // Store fx32 directly into int32_t buf_vbo — no float conversion
+        const rspv_t w = v_arr[i]->w;
+        const fx32 w_inv = fx32_div(FX32_ONE, w);
+        buf_vbo[buf_vbo_len++] = fx32_div(v_arr[i]->x, w);
+        buf_vbo[buf_vbo_len++] = fx32_div(v_arr[i]->y, w);
+        buf_vbo[buf_vbo_len++] = fx32_div(v_arr[i]->z + w, w) >> 1;  // *0.5
+        buf_vbo[buf_vbo_len++] = w_inv;
+  #else
         const rspv_t w = v_arr[i]->w;
         const rspv_t w_inv = RSPV_RCP(w);
         buf_vbo[buf_vbo_len++] = RSPV_MUL(v_arr[i]->x, w_inv);
         buf_vbo[buf_vbo_len++] = RSPV_MUL(v_arr[i]->y, w_inv);
         buf_vbo[buf_vbo_len++] = RSPV_MUL(v_arr[i]->z + w, RSPV_MUL(RSPV_HALF, w_inv));
         buf_vbo[buf_vbo_len++] = w_inv;
+  #endif
 #else
         rspv_t z = v_arr[i]->z, w = v_arr[i]->w;
         if (z_is_from_0_to_1) {
@@ -926,14 +1019,19 @@ static inline void gfx_push_triangle(const struct LoadedVertex *restrict v1, con
 #endif
 
         if (use_texture) {
-            float u = (v_arr[i]->u - rdp.texture_tile.uls * 8) / 32.0f;
-            float v = (v_arr[i]->v - rdp.texture_tile.ult * 8) / 32.0f;
+            float u = (RSPV_TO_FLOAT(v_arr[i]->u) - rdp.texture_tile.uls * 8) / 32.0f;
+            float v = (RSPV_TO_FLOAT(v_arr[i]->v) - rdp.texture_tile.ult * 8) / 32.0f;
             if ((rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT) {
                 u += 0.5f;
                 v += 0.5f;
             }
+#ifdef TARGET_POCKET
+            buf_vbo[buf_vbo_len++] = GFX_OUT_PROP(FX32_FROM_FLOAT(u / tex_width));
+            buf_vbo[buf_vbo_len++] = GFX_OUT_PROP(FX32_FROM_FLOAT(v / tex_height));
+#else
             buf_vbo[buf_vbo_len++] = GFX_OUT_PROP(u / tex_width);
             buf_vbo[buf_vbo_len++] = GFX_OUT_PROP(v / tex_height);
+#endif
         }
 
         if (use_fog) {
@@ -961,7 +1059,7 @@ static inline void gfx_push_triangle(const struct LoadedVertex *restrict v1, con
                         break;
                     case CC_LOD:
                     {
-                        float distance_frac = (v1->w - 3000.0f) / 3000.0f;
+                        float distance_frac = (RSPV_TO_FLOAT(v1->w) - 3000.0f) / 3000.0f;
                         if (distance_frac < 0.0f) distance_frac = 0.0f;
                         if (distance_frac > 1.0f) distance_frac = 1.0f;
                         tmp.r = tmp.g = tmp.b = tmp.a = distance_frac * 255.0f;
@@ -1105,6 +1203,16 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
     }
 
     if ((rsp.geometry_mode & G_CULL_BOTH) != 0) {
+#ifdef TARGET_POCKET
+        // Precise screen coords via fx32_div for correct backface culling
+        float sx1 = FX32_TO_FLOAT(fx32_div(v1->x, v1->w));
+        float sy1 = FX32_TO_FLOAT(fx32_div(v1->y, v1->w));
+        float sx2 = FX32_TO_FLOAT(fx32_div(v2->x, v2->w));
+        float sy2 = FX32_TO_FLOAT(fx32_div(v2->y, v2->w));
+        float sx3 = FX32_TO_FLOAT(fx32_div(v3->x, v3->w));
+        float sy3 = FX32_TO_FLOAT(fx32_div(v3->y, v3->w));
+        float cross = (sx1-sx2)*(sy3-sy2) - (sy1-sy2)*(sx3-sx2);
+#else
         rspv_t w1_inv = RSPV_RCP(v1->w);
         rspv_t w2_inv = RSPV_RCP(v2->w);
         rspv_t w3_inv = RSPV_RCP(v3->w);
@@ -1113,6 +1221,7 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
         rspv_t dx2 = RSPV_MUL(v3->x, w3_inv) - RSPV_MUL(v2->x, w2_inv);
         rspv_t dy2 = RSPV_MUL(v3->y, w3_inv) - RSPV_MUL(v2->y, w2_inv);
         float cross = dx1 * dy2 - dy1 * dx2;
+#endif
 
         if ((v1->w < 0) ^ (v2->w < 0) ^ (v3->w < 0)) {
             cross = -cross;
@@ -1513,6 +1622,20 @@ static void gfx_dp_texture_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int3
         const bool used_textures[2] = { true, false };
         gfx_pick_combiner(NULL, NULL);
         gfx_update_textures(used_textures, false);
+#ifdef TARGET_POCKET
+        // Pocket is always 4:3 at native res, ratio_x = ratio_y = 1.0
+        // ulx/uly/lrx/lry are U10.2 format — divide by 4 for pixels
+        float ulxf = ulx * ratio_x;
+        float ulyf = uly * ratio_y;
+        float lrxf = lrx * ratio_x;
+        float lryf = lry * ratio_y;
+        const float dudx = ((lrs - (float)uls) / (lrxf - ulxf));
+        const float dvdy = ((lrt - (float)ult) / (lryf - ulyf));
+        gfx_rapi->tex_rect(ulx / 4, uly / 4, lrx / 4, lry / 4,
+            FX32_FROM_FLOAT(uls / 32.f), FX32_FROM_FLOAT(ult / 32.f),
+            FX32_FROM_FLOAT(dudx / 8.f), FX32_FROM_FLOAT(dvdy / 8.f),
+            &rdp.env_color.r);
+#else
         float ulxf = ulx * ratio_x;
         float ulyf = uly * ratio_y;
         float lrxf = lrx * ratio_x;
@@ -1524,6 +1647,7 @@ static void gfx_dp_texture_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int3
         ulyf = ulyf / 4.0f;
         lryf = lryf / 4.0f;
         gfx_rapi->tex_rect(ulxf, ulyf, lrxf, lryf, uls / 32.f, ult / 32.f, dudx / 8.f, dvdy / 8.f, &rdp.env_color.r);
+#endif
     } else {
         struct LoadedVertex* ul = &rsp.loaded_vertices[MAX_VERTICES + 0];
         struct LoadedVertex* ll = &rsp.loaded_vertices[MAX_VERTICES + 1];

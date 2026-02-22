@@ -86,14 +86,55 @@ void send_display_list(struct SPTask *spTask) {
 #define SAMPLES_LOW 528
 #endif
 
+#ifdef TARGET_POCKET
+/* Debug overlay string — set by produce_one_frame, rendered by wm_pocket.c */
+char dbg_overlay_line[80];
+
+/* Rasterizer stats — updated by gfx_soft.c each draw_triangles call */
+extern uint32_t gfx_soft_rast_cycles;
+extern uint32_t gfx_soft_pixel_count;
+
+/* Format a uint32_t into buf, return pointer to start of digits */
+static char *dbg_u32(char *end, uint32_t v) {
+    *--end = '\0';
+    if (v == 0) { *--end = '0'; return end; }
+    while (v) { *--end = '0' + (v % 10); v /= 10; }
+    return end;
+}
+
+/* Append "L:NNNK" to *pp */
+static void dbg_append(char **pp, char label, uint32_t kilocycles) {
+    char tmp[16];
+    char *s;
+    char *p = *pp;
+    *p++ = label; *p++ = ':';
+    s = dbg_u32(tmp + 16, kilocycles);
+    while (*s) *p++ = *s++;
+    *p++ = 'K';
+    *pp = p;
+}
+
+#define CYCLE_LO (*(volatile uint32_t *)0x40000004)
+#endif
+
 void produce_one_frame(void) {
 #ifdef TARGET_POCKET
-    extern void term_printf(const char *fmt, ...);
     static int _frame_n;
-    term_printf("FRAME %d\n", _frame_n++);
+    uint32_t t0, t1, t2, t3;
+
+    /* Reset per-frame rasterizer counters */
+    gfx_soft_rast_cycles = 0;
+    gfx_soft_pixel_count = 0;
+
+    t0 = CYCLE_LO;
 #endif
+
     gfx_start_frame();
     game_loop_one_iteration();
+
+#ifdef TARGET_POCKET
+    t1 = CYCLE_LO;
+#endif
 
     if (configEnableSound) {
         int samples_left = audio_api->buffered();
@@ -105,7 +146,50 @@ void produce_one_frame(void) {
         audio_api->play((u8 *)audio_buffer, 2 * num_audio_samples * 4);
     }
 
+#ifdef TARGET_POCKET
+    t2 = CYCLE_LO;
+#endif
+
     gfx_end_frame();
+
+#ifdef TARGET_POCKET
+    t3 = CYCLE_LO;
+
+    /* Format: "G:NNK A:NK S:NK T:NNK\nR:NNK P:NN" */
+    {
+        uint32_t gfx_cycles   = t1 - t0;   /* game_loop + gfx_start */
+        uint32_t audio_cycles = t2 - t1;
+        uint32_t swap_cycles  = t3 - t2;    /* gfx_end_frame (fb convert + swap) */
+        uint32_t total_cycles = t3 - t0;    /* end-to-end, no accumulation bug */
+
+        char *p = dbg_overlay_line;
+
+        dbg_append(&p, 'G', gfx_cycles / 1000);
+        *p++ = ' ';
+        dbg_append(&p, 'A', audio_cycles / 1000);
+        *p++ = ' ';
+        dbg_append(&p, 'S', swap_cycles / 1000);
+        *p++ = ' ';
+        dbg_append(&p, 'T', total_cycles / 1000);
+        *p++ = '\n';
+        dbg_append(&p, 'R', gfx_soft_rast_cycles / 1000);
+        *p++ = ' ';
+
+        /* Pixel count (not kilocycles — raw thousands of pixels) */
+        {
+            char tmp[16];
+            char *s;
+            *p++ = 'P'; *p++ = ':';
+            s = dbg_u32(tmp + 16, gfx_soft_pixel_count / 1000);
+            while (*s) *p++ = *s++;
+            *p++ = 'K';
+        }
+
+        *p = '\0';
+    }
+
+    _frame_n++;
+#endif
 }
 
 #ifdef TARGET_WEB

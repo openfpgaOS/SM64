@@ -16,6 +16,7 @@
 #include "macros.h"
 #include "gfx/gfx_window_manager_api.h"
 #include "gfx/gfx_soft.h"
+#include "font8x8.h"
 
 /* System register MMIO */
 #define SYS_STATUS          (*(volatile uint32_t *)0x40000000)
@@ -126,10 +127,43 @@ static bool gfx_pocket_start_frame(void) {
     return true;
 }
 
+/* Debug overlay: draw text into RGB332 framebuffer */
+extern char dbg_overlay_line[80];
+
+static void dbg_draw_char(uint8_t *fb, int px, int py, char c) {
+    if (c < 32 || c > 127) return;
+    const uint8_t *glyph = font8x8[c - 32];
+    for (int row = 0; row < 8; row++) {
+        int y = py + row;
+        if ((unsigned)y >= SCREEN_HEIGHT) continue;
+        uint8_t *dst = fb + y * SCREEN_WIDTH + px;
+        uint8_t bits = glyph[row];
+        for (int col = 0; col < 8; col++) {
+            int x = px + col;
+            if ((unsigned)x >= SCREEN_WIDTH) continue;
+            dst[col] = (bits & (0x80 >> col)) ? 0xFF : 0x00;
+        }
+    }
+}
+
+static void dbg_draw_overlay(uint8_t *fb) {
+    int x = 1, y = 1;
+    for (const char *s = dbg_overlay_line; *s; s++) {
+        if (*s == '\n') { x = 1; y += 9; continue; }
+        dbg_draw_char(fb, x, y, *s);
+        x += 8;
+    }
+}
+
 static void gfx_pocket_swap_buffers_begin(void) {
     /* Convert the software rasterizer output to the hardware framebuffer */
     if (gfx_output != NULL) {
         convert_rgba32_to_rgb332();
+    }
+
+    /* Draw debug overlay on top of converted framebuffer */
+    if (dbg_overlay_line[0]) {
+        dbg_draw_overlay(fb_draw_buffer());
     }
 
     /* Request buffer flip (happens on next vblank) */

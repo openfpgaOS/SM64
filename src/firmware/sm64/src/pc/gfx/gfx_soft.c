@@ -20,9 +20,31 @@
 
 #ifdef TARGET_POCKET
 extern void term_printf(const char *fmt, ...);
+
+/* Per-frame rasterizer stats — read by pc_main.c for overlay */
+uint32_t gfx_soft_rast_cycles;
+uint32_t gfx_soft_pixel_count;
+#define RAST_CYCLE_LO (*(volatile uint32_t *)0x40000004)
+#define POCKET_PIXEL_COUNT(n) do { gfx_soft_pixel_count += (n); } while(0)
+#else
+#define POCKET_PIXEL_COUNT(n) ((void)0)
 #endif
 
-// DIAGNOSTIC: Pure float rendering pipeline — identical to non-Pocket path.
+#ifdef TARGET_POCKET
+#include "../../pocket/fx32.h"
+typedef fx32 rv_t;
+#define RV_ONE       FX32_ONE
+#define RV_HALF      FX32_HALF
+#define RV_ZERO      0
+#define RV_MUL(a,b)  fx32_mul(a,b)
+#define RV_RCP(a)    fx32_rcp(a)
+#define RV_DIV(a,b)  fx32_div(a,b)
+#define RV_TO_INT(a) FX32_TO_INT(a)
+#define RV_FROM_INT(a) FX32_FROM_INT(a)
+#define RV_FROM_FLOAT(f) FX32_FROM_FLOAT(f)
+#define RV_LITERAL(f) FX32_FROM_FLOAT(f)
+#define RV_Z_TO_ZBUF(v) ((v) >= 0x10000 ? 65535 : (v) < 0 ? 0 : (int)(v))
+#else
 typedef float rv_t;
 #define RV_ONE       1.0f
 #define RV_HALF      0.5f
@@ -34,8 +56,8 @@ typedef float rv_t;
 #define RV_FROM_INT(a) ((float)(a))
 #define RV_FROM_FLOAT(f) (f)
 #define RV_LITERAL(f) (f)
-// float [0,1] → z-buffer [0,65535]
 #define RV_Z_TO_ZBUF(v) ((int)((v) * 65535.f))
+#endif
 
 #define ALIGN(x, a) (((x) + (a - 1)) & ~(a - 1))
 
@@ -320,6 +342,12 @@ static inline Color4 tex_sample_linear(const struct Texture * const tex, const r
 static inline Color4 tex_sample_nearest(const struct Texture * const tex, const rv_t u, const rv_t v) {
     const int x = RV_TO_INT(RV_MUL(u, tex->fw));
     const int y = RV_TO_INT(RV_MUL(v, tex->fh));
+#ifdef TARGET_POCKET
+    /* Fast path: inline wrap-repeat (dominant mode) to avoid fn-ptr overhead.
+     * Fall back to fn-ptr for clamp/mirror textures. */
+    if (__builtin_expect(tex->sample == tex_sample_nearest_rr, 1))
+        return tex_get(tex, x & tex->wrap_w, y & tex->wrap_h);
+#endif
     return tex->sample(tex, x, y);
 }
 
@@ -492,15 +520,34 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
 
 /* rasterizers */
 
-// DIAGNOSTIC: Pure float — IEEE754 handles overflow/inf gracefully
+#ifdef TARGET_POCKET
+static inline rv_t rv_div_sat(rv_t a, rv_t b) {
+    if (b == 0) return (a >= 0) ? 0x7FFFFFFF : (int32_t)0x80000001;
+    return fx32_div(a, b);
+}
+#else
 #define rv_div_sat(a, b) RV_DIV(a, b)
+#endif
 #define rv_mul_wide(a, b) RV_MUL(a, b)
+#ifdef TARGET_POCKET
+// 64-bit cross product to avoid overflow: screen coords in Q16.16 can reach 20M
+#define R_COMPUTE_DENOM_AND_DP(dp_x, dp_y, v0, v1, v2, ab, ac, nprops) \
+    { int64_t _denom64 = (int64_t)ac.x * ab.y - (int64_t)ab.x * ac.y; \
+    if (_denom64 == 0) return; \
+    for (i = 2; i < nprops; ++i) { \
+        int64_t _nx = (int64_t)(v2[i] - v0[i]) * ab.y - (int64_t)(v1[i] - v0[i]) * ac.y; \
+        int64_t _ny = (int64_t)(v1[i] - v0[i]) * ac.x - (int64_t)(v2[i] - v0[i]) * ab.x; \
+        dp_x[i] = (rv_t)((_nx << 16) / _denom64); \
+        dp_y[i] = (rv_t)((_ny << 16) / _denom64); \
+    } }
+#else
 #define R_COMPUTE_DENOM_AND_DP(dp_x, dp_y, v0, v1, v2, ab, ac, nprops) \
     { const rv_t _denom = RV_RCP(RV_MUL(ac.x, ab.y) - RV_MUL(ab.x, ac.y)); \
     for (i = 2; i < nprops; ++i) { \
         dp_x[i] = RV_MUL(RV_MUL(v2[i] - v0[i], ab.y) - RV_MUL(v1[i] - v0[i], ac.y), _denom); \
         dp_y[i] = RV_MUL(RV_MUL(v1[i] - v0[i], ac.x) - RV_MUL(v2[i] - v0[i], ab.x), _denom); \
     } }
+#endif
 
 #define R_RASTERIZE_TRI_SEG(y_a, y_b, nprops) \
     register int y = y_a; \
@@ -519,6 +566,7 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
         for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
         idx = scr_width * (scr_height - y - 1) + x; \
         /* draw scanline from current x_a to current x_b */ \
+        POCKET_PIXEL_COUNT(x_end - x); \
         while (x++ < x_end) { \
             uz = u16clamp(RV_Z_TO_ZBUF(p[2]) + z_offset); \
             if (!z_test || uz <= z_buffer[idx]) { \
@@ -535,7 +583,8 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
         ++y; \
     }
 
-#define R_RASTERIZE(tri, nprops) \
+/* R_RASTERIZE_IMPL: parameterized by scanline macro SEG for specialization */
+#define R_RASTERIZE_IMPL(tri, nprops, SEG) \
     const rv_t *v0 = tri.v0; \
     const rv_t *v1 = tri.v1; \
     const rv_t *v2 = tri.v2; \
@@ -574,7 +623,7 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
             const rv_t dxdy_b = dxdy_ab; \
             /* last column of this scanline */ \
             rv_t x_b = v0[0] + RV_MUL(y_pre0, dxdy_ab); \
-            R_RASTERIZE_TRI_SEG(y0i, y1i, nprops); \
+            SEG(y0i, y1i, nprops); \
         } \
         if (y1i < y2i) { \
             /* left is AC, right is BC */ \
@@ -582,7 +631,7 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
             /* calculate prestep for vertex B */ \
             const rv_t y_pre1 = RV_ONE - (v1[1] - RV_FROM_INT(y1i)); \
             rv_t x_b = v1[0] + RV_MUL(y_pre1, dxdy_bc); \
-            R_RASTERIZE_TRI_SEG(y1i, y2i, nprops); \
+            SEG(y1i, y2i, nprops); \
         } \
     } else { \
         /* longer edge is on the right */ \
@@ -597,7 +646,7 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
                 dpdy_a[i] = rv_mul_wide(dxdy_ab, dp_x[i]) + dp_y[i]; \
                 p_a[i] = v0[i] + RV_MUL(y_pre0, dpdy_a[i]); \
             } \
-            R_RASTERIZE_TRI_SEG(y0i, y1i, nprops); \
+            SEG(y0i, y1i, nprops); \
         } \
         if (y1i < y2i) { \
             /* right is AC, left is BC */ \
@@ -608,9 +657,245 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
                 dpdy_a[i] = rv_mul_wide(dxdy_bc, dp_x[i]) + dp_y[i]; \
                 p_a[i] = v1[i] + RV_MUL(y_pre1, dpdy_a[i]); \
             } \
-            R_RASTERIZE_TRI_SEG(y1i, y2i, nprops); \
+            SEG(y1i, y2i, nprops); \
         } \
     }
+
+#define R_RASTERIZE(tri, nprops) R_RASTERIZE_IMPL(tri, nprops, R_RASTERIZE_TRI_SEG)
+
+/* Forward declarations for generic rast functions (used as fallback) */
+#define DECLARE_RAST_FUNC(nprops) \
+    static void rast_fn_ ## nprops (const struct Tri tri);
+DECLARE_RAST_FUNC(6)
+DECLARE_RAST_FUNC(7)
+DECLARE_RAST_FUNC(8)
+DECLARE_RAST_FUNC(9)
+DECLARE_RAST_FUNC(10)
+DECLARE_RAST_FUNC(11)
+DECLARE_RAST_FUNC(12)
+DECLARE_RAST_FUNC(13)
+DECLARE_RAST_FUNC(14)
+#undef DECLARE_RAST_FUNC
+static inline void gfx_soft_pick_draw_func(void);
+
+/* ============================================================
+ * TARGET_POCKET: Specialized scanline macros for hot shader modes.
+ * These inline all three function-pointer calls (combine, tex->sample, draw_fn)
+ * to eliminate ~36 cycles of per-pixel overhead.
+ * ============================================================ */
+#ifdef TARGET_POCKET
+
+/* --- Variant A: combine_tex_rgb + draw_pixel_zwrite ---
+ * Textured + vertex color modulate, opaque with z-write.
+ * nprops = 9: XYZW(0-3) + UV(4-5) + RGB(6-8)
+ * Most common SM64 shader mode (~40-50% of pixels).
+ */
+#define R_SEG_TEXRGB_ZWRITE(y_a, y_b, nprops) \
+    register int y = y_a; \
+    register int y_end = y_b; \
+    register int x, x_end; \
+    register int idx; \
+    rv_t dx, w; \
+    uint16_t uz; \
+    const struct Texture *_tex = cur_tex[0]; \
+    while (y < y_end) { \
+        x = imax(r_clip.x0, RV_TO_INT(x_a)); \
+        x_end = imin(r_clip.x1, RV_TO_INT(x_b)); \
+        dx = RV_ONE - (x_a - RV_FROM_INT(x)); \
+        for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
+        idx = scr_width * (scr_height - y - 1) + x; \
+        POCKET_PIXEL_COUNT(x_end - x); \
+        while (x++ < x_end) { \
+            const int32_t uz_raw = p[2] + z_offset; \
+            uz = (uz_raw < 0) ? 0 : (uz_raw > 0xFFFF) ? 0xFFFF : (uint16_t)uz_raw; \
+            if (!z_test || uz <= z_buffer[idx]) { \
+                w = RV_RCP(p[3]); \
+                const int tx = RV_TO_INT(RV_MUL(RV_MUL(p[4], w), _tex->fw)) & _tex->wrap_w; \
+                const int ty = RV_TO_INT(RV_MUL(RV_MUL(p[5], w), _tex->fh)) & _tex->wrap_h; \
+                const Color4 tc = (Color4){ .c = ((const uint32_t *)(texcache + _tex->addr))[ty * _tex->w + tx] }; \
+                int vr = RV_TO_INT(RV_MUL(p[6], w)); if (vr < 0) vr = 0; else if (vr > 255) vr = 255; \
+                int vg = RV_TO_INT(RV_MUL(p[7], w)); if (vg < 0) vg = 0; else if (vg > 255) vg = 255; \
+                int vb = RV_TO_INT(RV_MUL(p[8], w)); if (vb < 0) vb = 0; else if (vb > 255) vb = 255; \
+                gfx_output[idx] = (Color4){{ .r = mult_tab[tc.r][(uint8_t)vr], .g = mult_tab[tc.g][(uint8_t)vg], .b = mult_tab[tc.b][(uint8_t)vb], .a = 0xFF }}.c; \
+                if (z_write) z_buffer[idx] = uz; \
+            } \
+            for (i = 2; i < nprops; ++i) p[i] += dp_x[i]; \
+            ++idx; \
+        } \
+        x_a += dxdy_a; \
+        x_b += dxdy_b; \
+        for (i = 2; i < nprops; ++i) p_a[i] += dpdy_a[i]; \
+        ++y; \
+    }
+
+static void rast_fast_texrgb_zwrite(const struct Tri tri) {
+    /* Fall back to generic rasterizer for non-repeat textures */
+    if (__builtin_expect(cur_tex[0]->sample != tex_sample_nearest_rr, 0)) {
+        gfx_soft_pick_draw_func();
+        rast_fn_9(tri);
+        return;
+    }
+    R_RASTERIZE_IMPL(tri, 9, R_SEG_TEXRGB_ZWRITE);
+}
+
+/* --- Variant B: combine_tex_rgba + draw_pixel_blend_edge_zwrite ---
+ * Textured + vertex color with alpha, edge-blended with z-write.
+ * nprops = 10: XYZW(0-3) + UV(4-5) + RGBA(6-9)
+ * Alpha-tested foliage, objects (~15-20% of pixels).
+ */
+#define R_SEG_TEXRGBA_EDGE_ZWRITE(y_a, y_b, nprops) \
+    register int y = y_a; \
+    register int y_end = y_b; \
+    register int x, x_end; \
+    register int idx; \
+    rv_t dx, w; \
+    uint16_t uz; \
+    const struct Texture *_tex = cur_tex[0]; \
+    while (y < y_end) { \
+        x = imax(r_clip.x0, RV_TO_INT(x_a)); \
+        x_end = imin(r_clip.x1, RV_TO_INT(x_b)); \
+        dx = RV_ONE - (x_a - RV_FROM_INT(x)); \
+        for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
+        idx = scr_width * (scr_height - y - 1) + x; \
+        POCKET_PIXEL_COUNT(x_end - x); \
+        while (x++ < x_end) { \
+            const int32_t uz_raw = p[2] + z_offset; \
+            uz = (uz_raw < 0) ? 0 : (uz_raw > 0xFFFF) ? 0xFFFF : (uint16_t)uz_raw; \
+            if (!z_test || uz <= z_buffer[idx]) { \
+                w = RV_RCP(p[3]); \
+                const int tx = RV_TO_INT(RV_MUL(RV_MUL(p[4], w), _tex->fw)) & _tex->wrap_w; \
+                const int ty = RV_TO_INT(RV_MUL(RV_MUL(p[5], w), _tex->fh)) & _tex->wrap_h; \
+                const Color4 tc = (Color4){ .c = ((const uint32_t *)(texcache + _tex->addr))[ty * _tex->w + tx] }; \
+                int vr = RV_TO_INT(RV_MUL(p[6], w)); if (vr < 0) vr = 0; else if (vr > 255) vr = 255; \
+                int vg = RV_TO_INT(RV_MUL(p[7], w)); if (vg < 0) vg = 0; else if (vg > 255) vg = 255; \
+                int vb = RV_TO_INT(RV_MUL(p[8], w)); if (vb < 0) vb = 0; else if (vb > 255) vb = 255; \
+                int va = RV_TO_INT(RV_MUL(p[9], w)); if (va < 0) va = 0; else if (va > 255) va = 255; \
+                Color4 src; \
+                src.r = mult_tab[tc.r][(uint8_t)vr]; \
+                src.g = mult_tab[tc.g][(uint8_t)vg]; \
+                src.b = mult_tab[tc.b][(uint8_t)vb]; \
+                src.a = mult_tab[tc.a][(uint8_t)va]; \
+                /* blend_edge: only draw if alpha > 50% */ \
+                if (src.a > 0x80) { \
+                    const uint8_t a = src.a; \
+                    const uint8_t ia = 255 - a; \
+                    const Color4 dst = (Color4){ .c = gfx_output[idx] }; \
+                    src.r = mult_tab[src.r][a] + mult_tab[dst.r][ia]; \
+                    src.g = mult_tab[src.g][a] + mult_tab[dst.g][ia]; \
+                    src.b = mult_tab[src.b][a] + mult_tab[dst.b][ia]; \
+                    gfx_output[idx] = src.c; \
+                    if (z_write) z_buffer[idx] = uz; \
+                } \
+            } \
+            for (i = 2; i < nprops; ++i) p[i] += dp_x[i]; \
+            ++idx; \
+        } \
+        x_a += dxdy_a; \
+        x_b += dxdy_b; \
+        for (i = 2; i < nprops; ++i) p_a[i] += dpdy_a[i]; \
+        ++y; \
+    }
+
+static void rast_fast_texrgba_edge_zwrite(const struct Tri tri) {
+    if (__builtin_expect(cur_tex[0]->sample != tex_sample_nearest_rr, 0)) {
+        gfx_soft_pick_draw_func();
+        rast_fn_10(tri);
+        return;
+    }
+    R_RASTERIZE_IMPL(tri, 10, R_SEG_TEXRGBA_EDGE_ZWRITE);
+}
+
+/* --- Variant C: combine_rgb + draw_pixel_zwrite ---
+ * Solid vertex color, opaque with z-write. No texture.
+ * nprops = 7: XYZW(0-3) + RGB(4-6)
+ * Untextured surfaces, sky, some UI (~10-15% of pixels).
+ */
+#define R_SEG_RGB_ZWRITE(y_a, y_b, nprops) \
+    register int y = y_a; \
+    register int y_end = y_b; \
+    register int x, x_end; \
+    register int idx; \
+    rv_t dx, w; \
+    uint16_t uz; \
+    while (y < y_end) { \
+        x = imax(r_clip.x0, RV_TO_INT(x_a)); \
+        x_end = imin(r_clip.x1, RV_TO_INT(x_b)); \
+        dx = RV_ONE - (x_a - RV_FROM_INT(x)); \
+        for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
+        idx = scr_width * (scr_height - y - 1) + x; \
+        POCKET_PIXEL_COUNT(x_end - x); \
+        while (x++ < x_end) { \
+            const int32_t uz_raw = p[2] + z_offset; \
+            uz = (uz_raw < 0) ? 0 : (uz_raw > 0xFFFF) ? 0xFFFF : (uint16_t)uz_raw; \
+            if (!z_test || uz <= z_buffer[idx]) { \
+                w = RV_RCP(p[3]); \
+                int vr = RV_TO_INT(RV_MUL(p[4], w)); if (vr < 0) vr = 0; else if (vr > 255) vr = 255; \
+                int vg = RV_TO_INT(RV_MUL(p[5], w)); if (vg < 0) vg = 0; else if (vg > 255) vg = 255; \
+                int vb = RV_TO_INT(RV_MUL(p[6], w)); if (vb < 0) vb = 0; else if (vb > 255) vb = 255; \
+                gfx_output[idx] = (Color4){{ .r = (uint8_t)vr, .g = (uint8_t)vg, .b = (uint8_t)vb, .a = 0xFF }}.c; \
+                if (z_write) z_buffer[idx] = uz; \
+            } \
+            for (i = 2; i < nprops; ++i) p[i] += dp_x[i]; \
+            ++idx; \
+        } \
+        x_a += dxdy_a; \
+        x_b += dxdy_b; \
+        for (i = 2; i < nprops; ++i) p_a[i] += dpdy_a[i]; \
+        ++y; \
+    }
+
+static void rast_fast_rgb_zwrite(const struct Tri tri) {
+    R_RASTERIZE_IMPL(tri, 7, R_SEG_RGB_ZWRITE);
+}
+
+/* --- Variant D: combine_tex + draw_pixel_zwrite ---
+ * Texture only (no vertex color modulation), opaque with z-write.
+ * nprops = 6: XYZW(0-3) + UV(4-5)
+ */
+#define R_SEG_TEX_ZWRITE(y_a, y_b, nprops) \
+    register int y = y_a; \
+    register int y_end = y_b; \
+    register int x, x_end; \
+    register int idx; \
+    rv_t dx, w; \
+    uint16_t uz; \
+    const struct Texture *_tex = cur_tex[0]; \
+    while (y < y_end) { \
+        x = imax(r_clip.x0, RV_TO_INT(x_a)); \
+        x_end = imin(r_clip.x1, RV_TO_INT(x_b)); \
+        dx = RV_ONE - (x_a - RV_FROM_INT(x)); \
+        for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
+        idx = scr_width * (scr_height - y - 1) + x; \
+        POCKET_PIXEL_COUNT(x_end - x); \
+        while (x++ < x_end) { \
+            const int32_t uz_raw = p[2] + z_offset; \
+            uz = (uz_raw < 0) ? 0 : (uz_raw > 0xFFFF) ? 0xFFFF : (uint16_t)uz_raw; \
+            if (!z_test || uz <= z_buffer[idx]) { \
+                w = RV_RCP(p[3]); \
+                const int tx = RV_TO_INT(RV_MUL(RV_MUL(p[4], w), _tex->fw)) & _tex->wrap_w; \
+                const int ty = RV_TO_INT(RV_MUL(RV_MUL(p[5], w), _tex->fh)) & _tex->wrap_h; \
+                gfx_output[idx] = ((const uint32_t *)(texcache + _tex->addr))[ty * _tex->w + tx]; \
+                if (z_write) z_buffer[idx] = uz; \
+            } \
+            for (i = 2; i < nprops; ++i) p[i] += dp_x[i]; \
+            ++idx; \
+        } \
+        x_a += dxdy_a; \
+        x_b += dxdy_b; \
+        for (i = 2; i < nprops; ++i) p_a[i] += dpdy_a[i]; \
+        ++y; \
+    }
+
+static void rast_fast_tex_zwrite(const struct Tri tri) {
+    if (__builtin_expect(cur_tex[0]->sample != tex_sample_nearest_rr, 0)) {
+        gfx_soft_pick_draw_func();
+        rast_fn_6(tri);
+        return;
+    }
+    R_RASTERIZE_IMPL(tri, 6, R_SEG_TEX_ZWRITE);
+}
+
+#endif /* TARGET_POCKET */
 
 // define a bunch of rasterizers/interpolators for known property counts
 // nprops includes XYZW
@@ -777,6 +1062,20 @@ static struct ShaderProgram *gfx_soft_create_and_load_new_shader(uint32_t shader
     }
 
     prg->num_props = num_props;
+
+#ifdef TARGET_POCKET
+    /* Fast-path: assign specialized rasterizer for hot (combine, draw) pairs.
+     * These inline all function-pointer calls for ~2x per-pixel speedup. */
+    if (prg->combine == combine_tex_rgb && prg->draw_flags == 0)
+        prg->rast = rast_fast_texrgb_zwrite;
+    else if (prg->combine == combine_tex_rgba && (prg->draw_flags & DRAW_BLEND_EDGE))
+        prg->rast = rast_fast_texrgba_edge_zwrite;
+    else if (prg->combine == combine_rgb && prg->draw_flags == 0)
+        prg->rast = rast_fast_rgb_zwrite;
+    else if (prg->combine == combine_tex && prg->draw_flags == 0)
+        prg->rast = rast_fast_tex_zwrite;
+    else
+#endif
     // pick rasterizer that interps the amount of float properties this shader requires
     prg->rast = rast_funcs[num_props];
 
@@ -927,12 +1226,22 @@ static inline void gfx_soft_pick_draw_func(void) {
     draw_fn = draw_funcs[cur_shader->draw_flags | z_write];
 }
 
+#ifdef TARGET_POCKET
+static void gfx_soft_draw_triangles(int32_t buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
+#else
 static void gfx_soft_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
+#endif
     gfx_soft_pick_draw_func();
     const size_t num_verts = 3 * buf_vbo_num_tris;
     const size_t stride = buf_vbo_len / num_verts;
+#ifdef TARGET_POCKET
+    uint32_t rc0 = RAST_CYCLE_LO;
+#endif
     for (size_t i = 0; i < num_verts * stride; i += 3 * stride)
         pop_triangle(buf_vbo + i, stride);
+#ifdef TARGET_POCKET
+    gfx_soft_rast_cycles += RAST_CYCLE_LO - rc0;
+#endif
 }
 
 static void gfx_soft_fill_rect(int x0, int y0, int x1, int y1, const uint8_t *rgba) {
@@ -980,7 +1289,11 @@ static inline void gfx_soft_tex_rect_modulate(int x0, int y0, int x1, int y1, co
     }
 }
 
+#ifdef TARGET_POCKET
+static void gfx_soft_tex_rect(int x0, int y0, int x1, int y1, const int32_t u0, const int32_t v0, const int32_t dudx, const int32_t dvdy, const uint8_t *rgba) {
+#else
 static void gfx_soft_tex_rect(int x0, int y0, int x1, int y1, const float u0, const float v0, const float dudx, const float dvdy, const uint8_t *rgba) {
+#endif
     x0 = imax(0, x0);
     y0 = imax(0, y0);
     x1 = imin(scr_width, x1);
