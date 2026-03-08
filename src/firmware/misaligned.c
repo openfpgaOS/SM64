@@ -44,6 +44,8 @@ typedef struct {
 #define SDRAM_END       0x14000000
 #define PSRAM_START     0x30000000
 #define PSRAM_END       0x38000000
+#define SRAM_START      0x38000000
+#define SRAM_END        0x3C000000
 #define SDRAM_UC_START  0x50000000  /* Uncached SDRAM alias */
 #define SDRAM_UC_END    0x54000000
 
@@ -59,7 +61,9 @@ static int addr_valid(unsigned int addr, unsigned int len) {
     if (addr >= SDRAM_START && end < SDRAM_END) return 1;
     /* PSRAM */
     if (addr >= PSRAM_START && end < PSRAM_END) return 1;
-    /* SDRAM (uncached alias — used for PAK data) */
+    /* SRAM (z-buffer) */
+    if (addr >= SRAM_START && end < SRAM_END) return 1;
+    /* SDRAM (uncached alias) */
     if (addr >= SDRAM_UC_START && end < SDRAM_UC_END) return 1;
     return 0;
 }
@@ -247,8 +251,8 @@ void fatal_trap(trap_frame_t *frame) {
     /* term_printf can itself trap (misaligned access), so snapshot first.
      * Nested traps reuse the same trap-frame slot at top of BRAM stack. */
     trap_frame_t snap = *frame;
-    unsigned int dbg_stage = dbg_stage;
-    unsigned int dbg_info = dbg_info;
+    unsigned int snap_stage = dbg_stage;
+    unsigned int snap_info = dbg_info;
     unsigned int handled = misaligned_count;
 
     term_printf("\n!!!!!!!!!!!!!!!!!!!!!!!!!\n");
@@ -259,8 +263,8 @@ void fatal_trap(trap_frame_t *frame) {
     term_printf("mtval:  0x%08x\n", snap.mtval);
     term_printf("sp:     0x%08x\n", snap.regs[2]);
     term_printf("ra:     0x%08x\n", snap.regs[1]);
-    term_printf("dbg_stage: 0x%08x\n", dbg_stage);
-    term_printf("dbg_info:  0x%08x\n", dbg_info);
+    term_printf("dbg_stage: 0x%08x\n", snap_stage);
+    term_printf("dbg_info:  0x%08x\n", snap_info);
     term_printf("traps handled: %d\n", handled);
 
     if (addr_valid(snap.mepc, 4)) {

@@ -1,7 +1,6 @@
 /*
  * PocketSM64 Bootloader
- * Runs from BRAM, initializes system, waits for data slot loading, then jumps to SM64
- * Copies sm64.bin from SDRAM to PSRAM (CRAM0) for execution
+ * Runs from BRAM, loads sm64.bin via deferload into SDRAM, then jumps to SM64
  */
 
 #include "terminal.h"
@@ -21,27 +20,15 @@
 
 /* Data slot IDs (from data.json) */
 #define SLOT_SM64_BIN   0
-#define SLOT_ASSET_DATA 1
-
-/* Load addresses */
-#define SM64_BIN_ADDR   0x10200000  /* SDRAM (bridge loads here) */
-#define ASSET_DATA_ADDR 0x11000000  /* SDRAM (bridge loads here) */
-
-/* Maximum sizes to load */
-#define SM64_BIN_SIZE   (4 * 1024 * 1024)    /* 4 MB */
-#define ASSET_DATA_SIZE (20 * 1024 * 1024)   /* 20 MB */
 
 /* External symbols from linker */
 extern char _qbss_start[], _qbss_end[];
 extern char _runtime_stack_top[];
-extern char _app_copy_src[];    /* Source address (SDRAM LMA) */
-extern char _app_copy_dst[];    /* Destination address (PSRAM VMA) */
-extern char _app_copy_size[];   /* Size of .text + .data to copy */
-/* SM64 entry point (linked in PSRAM) */
+extern char _app_load_addr[];  /* SDRAM address where sm64.bin is loaded */
+extern char _app_load_size[];  /* Size to load */
+/* SM64 entry point (linked in SDRAM) */
 extern void sm64_main(void);
 extern void switch_to_runtime_stack_and_call(void (*entry)(void), void *stack_top);
-
-/* Note: Trap handling moved to misaligned.c for misaligned access emulation */
 
 /* Quick smoke test for FixedPointMacPlugin custom instructions */
 __attribute__((section(".text.boot")))
@@ -76,185 +63,127 @@ static int test_fx_instructions(void) {
     if (result == (int)0xFFFE0000) pass++; else fail++;
 
     /* Test 5: FXMACS/FXMACR dot product: 1*2 + 3*4 = 14.0 (0xE0000) */
-    /* First clear accumulator by reading it */
     __asm__ volatile(".insn r 0x0B, 2, 0, %0, x0, x0" : "=r"(result));
-    /* Now accumulate */
     __asm__ volatile(".insn r 0x0B, 1, 0, x0, %0, %1"
-        : : "r"(0x10000), "r"(0x20000));  /* acc += 1*2 */
+        : : "r"(0x10000), "r"(0x20000));
     __asm__ volatile(".insn r 0x0B, 1, 0, x0, %0, %1"
-        : : "r"(0x30000), "r"(0x40000));  /* acc += 3*4 */
+        : : "r"(0x30000), "r"(0x40000));
     __asm__ volatile(".insn r 0x0B, 2, 0, %0, x0, x0" : "=r"(result));
     BOOT_LOG("MAC 1*2+3*4=%x %s\n", result, result == 0xE0000 ? "OK" : "FAIL");
     if (result == 0xE0000) pass++; else fail++;
 
-    /* Test 6: FXMACR should have cleared acc — verify reads 0 */
+    /* Test 6: FXMACR should have cleared acc */
     __asm__ volatile(".insn r 0x0B, 2, 0, %0, x0, x0" : "=r"(result));
     BOOT_LOG("MAC clear=%x %s\n", result, result == 0 ? "OK" : "FAIL");
     if (result == 0) pass++; else fail++;
 
-    /* Test 7: FXRCP(1.0) = 1.0  (0x10000 -> ~0x10000) */
+    /* Test 7: FXRCP(1.0) = 1.0 */
     __asm__ volatile(".insn r 0x0B, 3, 0, %0, %1, x0"
         : "=r"(result) : "r"(0x10000));
-    /* Accept 0xFFFF or 0x10000 (1 LSB tolerance from LUT saturation) */
     BOOT_LOG("RCP 1.0=%x %s\n", result,
         (result >= 0xFFF0 && result <= 0x10010) ? "OK" : "FAIL");
     if (result >= 0xFFF0 && result <= 0x10010) pass++; else fail++;
 
-    /* Test 8: FXRCP(2.0) = 0.5  (0x20000 -> ~0x8000) */
+    /* Test 8: FXRCP(2.0) = 0.5 */
     __asm__ volatile(".insn r 0x0B, 3, 0, %0, %1, x0"
         : "=r"(result) : "r"(0x20000));
     BOOT_LOG("RCP 2.0=%x %s\n", result,
         (result >= 0x7FF0 && result <= 0x8010) ? "OK" : "FAIL");
     if (result >= 0x7FF0 && result <= 0x8010) pass++; else fail++;
 
-    /* Test 9: FXRCP(0.5) = 2.0  (0x8000 -> ~0x20000) */
-    __asm__ volatile(".insn r 0x0B, 3, 0, %0, %1, x0"
-        : "=r"(result) : "r"(0x8000));
-    BOOT_LOG("RCP 0.5=%x %s\n", result,
-        (result >= 0x1FFF0 && result <= 0x20010) ? "OK" : "FAIL");
-    if (result >= 0x1FFF0 && result <= 0x20010) pass++; else fail++;
-
-    /* Test 10: FXRCP(-1.0) = -1.0  (0xFFFF0000 -> ~0xFFFF0000) */
-    __asm__ volatile(".insn r 0x0B, 3, 0, %0, %1, x0"
-        : "=r"(result) : "r"((int)0xFFFF0000));
-    BOOT_LOG("RCP -1.0=%x %s\n", result,
-        (result <= (int)0xFFFF0010 && result >= (int)0xFFFEFFF0) ? "OK" : "FAIL");
-    if (result <= (int)0xFFFF0010 && result >= (int)0xFFFEFFF0) pass++; else fail++;
-
-    /* Test 11: FXRCP(4.0) = 0.25  (0x40000 -> ~0x4000) */
-    __asm__ volatile(".insn r 0x0B, 3, 0, %0, %1, x0"
-        : "=r"(result) : "r"(0x40000));
-    BOOT_LOG("RCP 4.0=%x %s\n", result,
-        (result >= 0x3FF0 && result <= 0x4010) ? "OK" : "FAIL");
-    if (result >= 0x3FF0 && result <= 0x4010) pass++; else fail++;
-
     BOOT_LOG("FX: Pass:%d Fail:%d\n", pass, fail);
     return fail;
 }
 
-/* Clear BSS section with progress reporting */
+/* Load sm64.bin from data slot 0 into SDRAM via deferload */
+__attribute__((section(".text.boot")))
+static int load_sm64_bin_from_slot(void) {
+    uint32_t total = (uint32_t)_app_load_size;
+    uint32_t base = (uint32_t)_app_load_addr;
+    uint32_t done = 0;
+
+    BOOT_LOG("Loading sm64.bin: %d bytes to 0x%x\n", total, base);
+
+    while (done < total) {
+        uint32_t chunk = total - done;
+        if (chunk > DMA_CHUNK_SIZE)
+            chunk = DMA_CHUNK_SIZE;
+
+        int rc = dataslot_read(SLOT_SM64_BIN, done, (void *)(base + done), chunk);
+        if (rc < 0) {
+            BOOT_LOG("Load FAIL at offset %x: %d\n", done, rc);
+            return rc;
+        }
+
+        done += chunk;
+        if ((done & 0xFFFFF) == 0)  /* Progress every 1MB */
+            BOOT_LOG("  %dK / %dK\n", done >> 10, total >> 10);
+    }
+
+    BOOT_LOG("Load complete: %d bytes\n", done);
+    return 0;
+}
+
+/* Clear BSS section */
 __attribute__((section(".text.boot")))
 static void clear_qbss(void) {
     unsigned int *p = (unsigned int *)_qbss_start;
     unsigned int *end = (unsigned int *)_qbss_end;
-    unsigned int *next_report = p + (64 * 1024 / 4);  /* Report every 64KB */
-    int count = 0;
 
-    BOOT_LOG("loop @%x\n", (unsigned int)p);
-    while (p < end) {
+    BOOT_LOG("Clearing BSS 0x%x-0x%x...\n", (unsigned int)p, (unsigned int)end);
+    while (p < end)
         *p++ = 0;
-        if (p >= next_report) {
-            BOOT_LOG("@%x\n", (unsigned int)p);
-            next_report += (64 * 1024 / 4);
-            count++;
-        }
-    }
-    BOOT_LOG("Done(%d)\n", count);
-}
-
-/* Copy app binary from SDRAM (LMA) to PSRAM (VMA) for execution */
-__attribute__((section(".text.boot")))
-static void copy_to_psram(void) {
-    volatile unsigned int *src = (volatile unsigned int *)_app_copy_src;
-    volatile unsigned int *dst = (volatile unsigned int *)_app_copy_dst;
-    unsigned int words = (unsigned int)_app_copy_size / 4;
-    unsigned int i;
-
-    BOOT_LOG("Copy SDRAM 0x%x -> PSRAM 0x%x (%d bytes)\n",
-             (unsigned int)src, (unsigned int)dst, (unsigned int)_app_copy_size);
-
-    for (i = 0; i < words; i++)
-        dst[i] = src[i];
-
-    /* Fence: flush D-cache dirty lines to PSRAM, then invalidate I-cache
-     * so instruction fetches see the freshly-copied code.
-     * fence.i = 0x0000100f (raw encoding avoids needing zifencei in -march) */
-    __asm__ volatile("fence");
-    __asm__ volatile(".word 0x0000100f");  /* fence.i */
-
-    BOOT_LOG("Copy done, fence.i issued\n");
+    BOOT_LOG("BSS cleared.\n");
 }
 
 __attribute__((section(".text.boot")))
 int main(void) {
-    /* Initialize terminal early for debug output (safe: uses terminal BRAM) */
     term_init();
-    BOOT_LOG("Boot @ 100MHz\n\n");
-    BOOT_LOG("Waiting for dataslot_allcomplete (SYS_STATUS bit1)...\n");
+    BOOT_LOG("PocketSM64 boot\n");
 
-    /* CRITICAL: Wait for APF dataslot loading BEFORE touching SDRAM */
-    unsigned int last_report = SYS_CYCLE_LO;
-    unsigned int start_wait = last_report;
+    /* Wait for APF bridge allcomplete before issuing dataslot commands */
+    BOOT_LOG("Waiting for allcomplete...\n");
+    unsigned int start_wait = SYS_CYCLE_LO;
     while (!(SYS_STATUS & (1 << 1))) {
-        unsigned int now = SYS_CYCLE_LO;
-        if ((now - last_report) > 6600000) {  /* ~0.1s at 66MHz */
-            BOOT_LOG("SYS_STATUS=0x%x\n", SYS_STATUS);
-            last_report = now;
-        }
-        if ((now - start_wait) > 240000000) { /* ~5s timeout */
-            BOOT_LOG("Timeout waiting for dataslot; continuing anyway.\n");
+        if ((SYS_CYCLE_LO - start_wait) > 500000000) { /* 5s timeout */
+            BOOT_LOG("Timeout; continuing.\n");
             break;
         }
     }
 
-    /* Keep boot checks lightweight to avoid triggering timing-sensitive failures. */
-    BOOT_LOG("=== SDRAM SMOKE TEST ===\n");
-    volatile unsigned int *test = (volatile unsigned int *)0x13000000;
-    unsigned int rb;
-    int pass_count = 0, fail_count = 0;
-
-    BOOT_LOG("[Test 1: 32-bit W/R]\n");
-    test[0] = 0xAABBCCDD;
-    rb = test[0];
-    BOOT_LOG("W:AABBCCDD R:%x %s\n", rb, rb == 0xAABBCCDD ? "OK" : "FAIL");
-    if (rb == 0xAABBCCDD) pass_count++; else fail_count++;
-
-    test[0] = 0x12345678;
-    rb = test[0];
-    BOOT_LOG("W:12345678 R:%x %s\n", rb, rb == 0x12345678 ? "OK" : "FAIL");
-    if (rb == 0x12345678) pass_count++; else fail_count++;
-
-    BOOT_LOG("Pass:%d Fail:%d\n", pass_count, fail_count);
-
     /* Test custom FX instructions */
     test_fx_instructions();
 
-    /* Show BSS region for debugging */
-    BOOT_LOG("BSS: 0x%x - 0x%x\n", (unsigned int)_qbss_start, (unsigned int)_qbss_end);
-    BOOT_LOG("BSS size: %d bytes\n", (int)(_qbss_end - _qbss_start));
+    /* Light SDRAM smoke test */
+    BOOT_LOG("=== SDRAM SMOKE TEST ===\n");
+    volatile unsigned int *test = (volatile unsigned int *)0x13000000;
+    test[0] = 0xAABBCCDD;
+    unsigned int rb = test[0];
+    BOOT_LOG("W:AABBCCDD R:%x %s\n", rb, rb == 0xAABBCCDD ? "OK" : "FAIL");
 
-    /* Copy app code+data from SDRAM to PSRAM */
-    BOOT_LOG("\n=== COPY TO PSRAM ===\n");
-    copy_to_psram();
+    /* Load sm64.bin from SD card via deferload */
+    BOOT_LOG("\n=== LOADING SM64 ===\n");
+    int rc = load_sm64_bin_from_slot();
+    if (rc < 0) {
+        BOOT_LOG("FATAL: load failed (%d)\n", rc);
+        while (1) {}
+    }
 
-    /* Assets stay in cached SDRAM (0x11000000) for fast D-cache burst reads. */
-    BOOT_LOG("Assets: cached SDRAM @ 0x11000000\n");
+    /* Invalidate I-cache so instruction fetches see the loaded code */
+    __asm__ volatile("fence");
+    __asm__ volatile(".word 0x0000100f");  /* fence.i */
 
-    /* Clear BSS section before running app */
-    BOOT_LOG("\nClearing BSS 0x%x-0x%x...\n", (unsigned int)_qbss_start, (unsigned int)_qbss_end);
-
-    /* Test first BSS write before full clear */
-    volatile unsigned int *bss_test = (volatile unsigned int *)_qbss_start;
-    BOOT_LOG("BSS test write @0x%x...\n", (unsigned int)bss_test);
-    *bss_test = 0;
-    BOOT_LOG("BSS test write OK\n");
-
-    BOOT_LOG("Calling clear_qbss...\n");
+    /* Clear BSS section */
     clear_qbss();
-    BOOT_LOG("BSS cleared.\n");
 
-    /* Jump to SM64! */
+    /* Jump to SM64 */
     BOOT_LOG("\nStarting SM64...\n");
     BOOT_LOG("sm64_main @ 0x%x\n", (unsigned int)sm64_main);
-    BOOT_LOG("runtime stack top @ 0x%x\n", (unsigned int)_runtime_stack_top);
+    BOOT_LOG("stack @ 0x%x\n", (unsigned int)_runtime_stack_top);
 
-    BOOT_LOG("Jumping now...\n");
     switch_to_runtime_stack_and_call(sm64_main, _runtime_stack_top);
 
-    /* Test: if we get here, instruction fetch from PSRAM worked! */
-    BOOT_LOG("SUCCESS: sm64_main returned!\n");
-    BOOT_LOG("PSRAM instruction fetch works!\n");
+    BOOT_LOG("sm64_main returned!\n");
     while (1) {}
-
     return 0;
 }

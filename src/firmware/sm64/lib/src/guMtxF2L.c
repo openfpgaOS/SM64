@@ -39,18 +39,6 @@ void guMtxL2F(float mf[4][4], Mtx *m) {
         }
     }
 }
-#elif defined(TARGET_POCKET)
-// Convert float matrix to raw Q16.16 (fx32) packed into Mtx storage.
-// This is the sole float→fx32 boundary for matrices: guPerspective, guOrtho,
-// guRotate, guTranslate, guScale, mtxf_to_mtx all funnel through here.
-// Called ~1-5 times per frame — negligible cost.
-void guMtxF2L(float mf[4][4], Mtx *m) {
-    int i;
-    s32 *d = (s32 *)m->m;
-    float *s = (float *)mf;
-    for (i = 0; i < 16; i++)
-        d[i] = (s32)(s[i] * 65536.0f);
-}
 #else
 void guMtxF2L(float mf[4][4], Mtx *m) {
     memcpy(m, mf, sizeof(Mtx));
@@ -74,12 +62,6 @@ void guMtxIdent(Mtx *m) {
     float mf[4][4];
     guMtxIdentF(mf);
     guMtxF2L(mf, m);
-#elif defined(TARGET_POCKET)
-    // Direct fx32 identity — no float intermediate
-    s32 *d = (s32 *)m->m;
-    int i;
-    for (i = 0; i < 16; i++) d[i] = 0;
-    d[0] = d[5] = d[10] = d[15] = 0x10000; // FX32_ONE
 #else
     guMtxIdentF(m->m);
 #endif

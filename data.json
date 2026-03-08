@@ -11,7 +11,7 @@
                     "bin"
                 ],
                 "filename": "sm64.bin",
-                "address": "0x00200000"
+                "deferload": true
             }
         ]
     }

@@ -18,33 +18,7 @@
 #include "gfx_cc.h"
 #include "macros.h"
 
-#ifdef TARGET_POCKET
-extern void term_printf(const char *fmt, ...);
 
-/* Per-frame rasterizer stats — read by pc_main.c for overlay */
-uint32_t gfx_soft_rast_cycles;
-uint32_t gfx_soft_pixel_count;
-#define RAST_CYCLE_LO (*(volatile uint32_t *)0x40000004)
-#define POCKET_PIXEL_COUNT(n) do { gfx_soft_pixel_count += (n); } while(0)
-#else
-#define POCKET_PIXEL_COUNT(n) ((void)0)
-#endif
-
-#ifdef TARGET_POCKET
-#include "../../pocket/fx32.h"
-typedef fx32 rv_t;
-#define RV_ONE       FX32_ONE
-#define RV_HALF      FX32_HALF
-#define RV_ZERO      0
-#define RV_MUL(a,b)  fx32_mul(a,b)
-#define RV_RCP(a)    fx32_rcp(a)
-#define RV_DIV(a,b)  fx32_div(a,b)
-#define RV_TO_INT(a) FX32_TO_INT(a)
-#define RV_FROM_INT(a) FX32_FROM_INT(a)
-#define RV_FROM_FLOAT(f) FX32_FROM_FLOAT(f)
-#define RV_LITERAL(f) FX32_FROM_FLOAT(f)
-#define RV_Z_TO_ZBUF(v) ((v) >= 0x10000 ? 65535 : (v) < 0 ? 0 : (int)(v))
-#else
 typedef float rv_t;
 #define RV_ONE       1.0f
 #define RV_HALF      0.5f
@@ -57,7 +31,6 @@ typedef float rv_t;
 #define RV_FROM_FLOAT(f) (f)
 #define RV_LITERAL(f) (f)
 #define RV_Z_TO_ZBUF(v) ((int)((v) * 65535.f))
-#endif
 
 #define ALIGN(x, a) (((x) + (a - 1)) & ~(a - 1))
 
@@ -529,34 +502,14 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
 
 /* rasterizers */
 
-#ifdef TARGET_POCKET
-static inline rv_t rv_div_sat(rv_t a, rv_t b) {
-    if (b == 0) return (a >= 0) ? 0x7FFFFFFF : (int32_t)0x80000001;
-    return fx32_mul(a, fx32_rcp(b));
-}
-#else
 #define rv_div_sat(a, b) RV_DIV(a, b)
-#endif
 #define rv_mul_wide(a, b) RV_MUL(a, b)
-#ifdef TARGET_POCKET
-// 64-bit cross product to avoid overflow: screen coords in Q16.16 can reach 20M
-#define R_COMPUTE_DENOM_AND_DP(dp_x, dp_y, v0, v1, v2, ab, ac, nprops) \
-    { int64_t _denom64 = (int64_t)ac.x * ab.y - (int64_t)ab.x * ac.y; \
-    if (_denom64 == 0) return; \
-    for (i = 2; i < nprops; ++i) { \
-        int64_t _nx = (int64_t)(v2[i] - v0[i]) * ab.y - (int64_t)(v1[i] - v0[i]) * ac.y; \
-        int64_t _ny = (int64_t)(v1[i] - v0[i]) * ac.x - (int64_t)(v2[i] - v0[i]) * ab.x; \
-        dp_x[i] = (rv_t)((_nx << 16) / _denom64); \
-        dp_y[i] = (rv_t)((_ny << 16) / _denom64); \
-    } }
-#else
 #define R_COMPUTE_DENOM_AND_DP(dp_x, dp_y, v0, v1, v2, ab, ac, nprops) \
     { const rv_t _denom = RV_RCP(RV_MUL(ac.x, ab.y) - RV_MUL(ab.x, ac.y)); \
     for (i = 2; i < nprops; ++i) { \
         dp_x[i] = RV_MUL(RV_MUL(v2[i] - v0[i], ab.y) - RV_MUL(v1[i] - v0[i], ac.y), _denom); \
         dp_y[i] = RV_MUL(RV_MUL(v1[i] - v0[i], ac.x) - RV_MUL(v2[i] - v0[i], ab.x), _denom); \
     } }
-#endif
 
 #define R_RASTERIZE_TRI_SEG(y_a, y_b, nprops) \
     register int y = y_a; \
@@ -575,7 +528,6 @@ static inline rv_t rv_div_sat(rv_t a, rv_t b) {
         for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
         idx = scr_width * (scr_height - y - 1) + x; \
         /* draw scanline from current x_a to current x_b */ \
-        POCKET_PIXEL_COUNT(x_end - x); \
         while (x++ < x_end) { \
             uz = u16clamp(RV_Z_TO_ZBUF(p[2]) + z_offset); \
             if (!z_test || uz <= z_buffer[idx]) { \
@@ -713,7 +665,6 @@ static inline void gfx_soft_pick_draw_func(void);
         dx = RV_ONE - (x_a - RV_FROM_INT(x)); \
         for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
         idx = scr_width * (scr_height - y - 1) + x; \
-        POCKET_PIXEL_COUNT(x_end - x); \
         while (x++ < x_end) { \
             const int32_t uz_raw = p[2] + z_offset; \
             uz = (uz_raw < 0) ? 0 : (uz_raw > 0xFFFF) ? 0xFFFF : (uint16_t)uz_raw; \
@@ -766,7 +717,6 @@ static void rast_fast_texrgb_zwrite(const struct Tri tri) {
         dx = RV_ONE - (x_a - RV_FROM_INT(x)); \
         for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
         idx = scr_width * (scr_height - y - 1) + x; \
-        POCKET_PIXEL_COUNT(x_end - x); \
         while (x++ < x_end) { \
             const int32_t uz_raw = p[2] + z_offset; \
             uz = (uz_raw < 0) ? 0 : (uz_raw > 0xFFFF) ? 0xFFFF : (uint16_t)uz_raw; \
@@ -832,7 +782,6 @@ static void rast_fast_texrgba_edge_zwrite(const struct Tri tri) {
         dx = RV_ONE - (x_a - RV_FROM_INT(x)); \
         for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
         idx = scr_width * (scr_height - y - 1) + x; \
-        POCKET_PIXEL_COUNT(x_end - x); \
         while (x++ < x_end) { \
             const int32_t uz_raw = p[2] + z_offset; \
             uz = (uz_raw < 0) ? 0 : (uz_raw > 0xFFFF) ? 0xFFFF : (uint16_t)uz_raw; \
@@ -875,7 +824,6 @@ static void rast_fast_rgb_zwrite(const struct Tri tri) {
         dx = RV_ONE - (x_a - RV_FROM_INT(x)); \
         for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
         idx = scr_width * (scr_height - y - 1) + x; \
-        POCKET_PIXEL_COUNT(x_end - x); \
         while (x++ < x_end) { \
             const int32_t uz_raw = p[2] + z_offset; \
             uz = (uz_raw < 0) ? 0 : (uz_raw > 0xFFFF) ? 0xFFFF : (uint16_t)uz_raw; \
@@ -924,11 +872,6 @@ DEFINE_RAST_FUNC(12)
 DEFINE_RAST_FUNC(13)
 DEFINE_RAST_FUNC(14)
 
-#ifdef TARGET_POCKET
-static int rast_tri_dump_count;
-static int rast_frame_count;
-#endif
-
 static inline void pop_triangle(rv_t *buf, const int stride) {
     Vector4 *v0 = (Vector4 *)buf;
     Vector4 *v1 = (Vector4 *)(buf + stride);
@@ -939,19 +882,6 @@ static inline void pop_triangle(rv_t *buf, const int stride) {
     viewport_transform(v0);
     viewport_transform(v1);
     viewport_transform(v2);
-
-#ifdef TARGET_POCKET
-    // Dump first 8 triangles of frame 60 to terminal
-    if (rast_frame_count == 60 && rast_tri_dump_count < 8) {
-        term_printf("R[%d] (%d,%d)-(%d,%d)-(%d,%d) s=%d\n",
-            rast_tri_dump_count,
-            RV_TO_INT(v0->x), RV_TO_INT(v0->y),
-            RV_TO_INT(v1->x), RV_TO_INT(v1->y),
-            RV_TO_INT(v2->x), RV_TO_INT(v2->y),
-            stride);
-        rast_tri_dump_count++;
-    }
-#endif
 
     // sort in Y order
     if (v0->y > v1->y) { vt = v0; v0 = v1; v1 = vt; }
@@ -1072,19 +1002,6 @@ static struct ShaderProgram *gfx_soft_create_and_load_new_shader(uint32_t shader
 
     prg->num_props = num_props;
 
-#ifdef TARGET_POCKET
-    /* Fast-path: assign specialized rasterizer for hot (combine, draw) pairs.
-     * These inline all function-pointer calls for ~2x per-pixel speedup. */
-    if (prg->combine == combine_tex_rgb && prg->draw_flags == 0)
-        prg->rast = rast_fast_texrgb_zwrite;
-    else if (prg->combine == combine_tex_rgba && (prg->draw_flags & DRAW_BLEND_EDGE))
-        prg->rast = rast_fast_texrgba_edge_zwrite;
-    else if (prg->combine == combine_rgb && prg->draw_flags == 0)
-        prg->rast = rast_fast_rgb_zwrite;
-    else if (prg->combine == combine_tex && prg->draw_flags == 0)
-        prg->rast = rast_fast_tex_zwrite;
-    else
-#endif
     // pick rasterizer that interps the amount of float properties this shader requires
     prg->rast = rast_funcs[num_props];
 
@@ -1235,22 +1152,12 @@ static inline void gfx_soft_pick_draw_func(void) {
     draw_fn = draw_funcs[cur_shader->draw_flags | z_write];
 }
 
-#ifdef TARGET_POCKET
-static void gfx_soft_draw_triangles(int32_t buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
-#else
 static void gfx_soft_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
-#endif
     gfx_soft_pick_draw_func();
     const size_t num_verts = 3 * buf_vbo_num_tris;
     const size_t stride = buf_vbo_len / num_verts;
-#ifdef TARGET_POCKET
-    uint32_t rc0 = RAST_CYCLE_LO;
-#endif
     for (size_t i = 0; i < num_verts * stride; i += 3 * stride)
         pop_triangle(buf_vbo + i, stride);
-#ifdef TARGET_POCKET
-    gfx_soft_rast_cycles += RAST_CYCLE_LO - rc0;
-#endif
 }
 
 static void gfx_soft_fill_rect(int x0, int y0, int x1, int y1, const uint8_t *rgba) {
@@ -1298,11 +1205,7 @@ static inline void gfx_soft_tex_rect_modulate(int x0, int y0, int x1, int y1, co
     }
 }
 
-#ifdef TARGET_POCKET
-static void gfx_soft_tex_rect(int x0, int y0, int x1, int y1, const int32_t u0, const int32_t v0, const int32_t dudx, const int32_t dvdy, const uint8_t *rgba) {
-#else
 static void gfx_soft_tex_rect(int x0, int y0, int x1, int y1, const float u0, const float v0, const float dudx, const float dvdy, const uint8_t *rgba) {
-#endif
     x0 = imax(0, x0);
     y0 = imax(0, y0);
     x1 = imin(scr_width, x1);
@@ -1375,10 +1278,6 @@ static void gfx_soft_start_frame(void) {
     // depth_swap(); // FIXME: ztrick
     color_clear();
     depth_clear();
-#ifdef TARGET_POCKET
-    rast_tri_dump_count = 0;
-    rast_frame_count++;
-#endif
 }
 
 static void gfx_soft_shutdown(void) {

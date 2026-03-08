@@ -1,8 +1,10 @@
-package vexriscv.plugin
+package vexiiriscv.execute
 
-import vexriscv._
-import vexriscv.plugin._
 import spinal.core._
+import spinal.lib._
+import spinal.lib.misc.pipeline._
+import vexiiriscv.riscv._
+import vexiiriscv.riscv.Riscv._
 
 // Q16.16 fixed-point multiply, multiply-accumulate, reciprocal, rsqrt, clamp, and divide.
 // Uses RISC-V custom-0 opcode space (0x0B), R-type encoding.
@@ -11,575 +13,439 @@ import spinal.core._
 // FXMACS   rs1, rs2      (funct3=001): acc += (rs1 * rs2) >> 16
 // FXMACR   rd            (funct3=010): rd = acc[31:0]; acc = 0
 // FXRCP    rd, rs1       (funct3=011): rd = (1 << 32) / rs1  (Q16.16 reciprocal)
-// FXCLAMP  rd, rs1, rs2  (funct3=100): rd = max(0, min(rs1, rs2))  (signed clamp to [0, rs2])
+// FXCLAMP  rd, rs1, rs2  (funct3=100): rd = max(0, min(rs1, rs2))
 // FXRSQRT  rd, rs1       (funct3=101): rd = 1/sqrt(rs1)  (Q16.16 inverse square root)
-// FXDIV    rd, rs1, rs2  (funct3=110): rd = ((int64_t)rs1 << 16) / rs2  (Q16.16 division)
+// FXDIV    rd, rs1, rs2  (funct3=110): rd = ((int64_t)rs1 << 16) / rs2
 //
-// Pipeline: multiply DECOMPOSED into 17x17 partial products in execute stage,
-// combined in memory stage.  Matches VexRiscv MulPlugin decomposition pattern
-// so each partial product maps to one 18x18 DSP block on Cyclone V.
-// FXMUL/FXMACR/FXRCP/FXRSQRT/FXDIV results are bypassable from memory stage.
-//
-// FXRCP implementation (5-cycle latency: 3 execute + memory + writeback):
-//   Execute cycle 0: absolute value, CLZ -> local registers (~6ns)
-//   Execute cycle 1: normalize (barrel shift), LUT lookup (256 entries),
-//                     compute x_norm * y0 via DSP (16x16 -> 32) -> local registers (~8ns)
-//   Execute cycle 2: Newton-Raphson correction: y1 = y0 * (2 - x_norm * y0)
-//                     via DSP (16x16 -> 32) -> pipeline stageables (~5ns)
-//   Memory stage:    de-normalize by barrel shift, saturate, apply sign (~4ns)
-//
-// FXRSQRT implementation (3-cycle latency: 2 execute + memory):
-//   Execute cycle 0: CLZ -> local register (~6ns)
-//   Execute cycle 1: even-normalize (barrel shift), 512-entry LUT lookup -> stageables (~6ns)
-//   Memory stage:    de-normalize by half-shift, handle zero/negative (~4ns)
-//   Uses no DSP blocks; 512-entry LUT provides ~9 bits of precision (sufficient for
-//   vector normalization → 8-bit lighting colors).
-//
-// FXDIV implementation (35-cycle latency: 34 execute + memory):
-//   Execute cycle 0: absolute values, overflow check -> local registers
-//   Execute cycles 1-32: restoring division loop (1 quotient bit per cycle)
-//   Execute cycle 33: writeback registered quotient to stageables
-//   Memory stage:    apply sign, handle zero/overflow, saturate
-//   Uses 0 DSP blocks, ~150 ALMs (33-bit subtractor + registers).
+// Pipeline: multiply decomposed into 17x17 partial products at mulAt stage,
+// combined at writebackAt stage.  FXRCP uses 3-cycle freeze in execute.
+// FXDIV uses 34-cycle freeze (restoring division).
 
-class FixedPointMacPlugin extends Plugin[VexRiscv] {
+object FixedPointMacPlugin extends AreaObject {
+  // Instruction type flags
+  val IS_FXMUL   = Payload(Bool())
+  val IS_FXMACS  = Payload(Bool())
+  val IS_FXMACR  = Payload(Bool())
+  val IS_FXRCP   = Payload(Bool())
+  val IS_FXCLAMP = Payload(Bool())
+  val IS_FXRSQRT = Payload(Bool())
+  val IS_FXDIV   = Payload(Bool())
 
-  // Instruction flags (set by decoder, flow through pipeline)
-  object IS_FXMUL   extends Stageable(Bool)
-  object IS_FXMACS  extends Stageable(Bool)
-  object IS_FXMACR  extends Stageable(Bool)
-  object IS_FXRCP   extends Stageable(Bool)
-  object IS_FXCLAMP extends Stageable(Bool)
-  object IS_FXRSQRT extends Stageable(Bool)
-  object IS_FXDIV   extends Stageable(Bool)
+  // Pipelined partial products (execute -> writeback)
+  val FX_MUL_LL = Payload(Bits(32 bits))
+  val FX_MUL_LH = Payload(Bits(34 bits))
+  val FX_MUL_HL = Payload(Bits(34 bits))
+  val FX_MUL_HH = Payload(Bits(34 bits))
 
-  // Pipelined partial products: execute -> memory
-  // Decomposition: a = aHigh * 2^16 + aULow, b = bHigh * 2^16 + bULow
-  // product = aULow*bULow + (aSLow*bHigh + aHigh*bSLow)*2^16 + aHigh*bHigh*2^32
-  object FX_MUL_LL extends Stageable(Bits(32 bits))   // aULow * bULow (unsigned 16x16)
-  object FX_MUL_LH extends Stageable(Bits(34 bits))   // aSLow * bHigh (signed 17x17)
-  object FX_MUL_HL extends Stageable(Bits(34 bits))   // aHigh * bSLow (signed 17x17)
-  object FX_MUL_HH extends Stageable(Bits(34 bits))   // aHigh * bHigh (signed 17x17)
+  // FXRCP pipeline stageables
+  val RCP_Y1    = Payload(UInt(32 bits))
+  val RCP_SHIFT = Payload(UInt(5 bits))
+  val RCP_SIGN  = Payload(Bool())
+  val RCP_ZERO  = Payload(Bool())
 
-  // FXRCP pipeline stageables: execute -> memory
-  object RCP_Y1       extends Stageable(UInt(32 bits))  // Newton-Raphson refined y1 (Q1.31)
-  object RCP_SHIFT    extends Stageable(UInt(5 bits))   // CLZ of |input|
-  object RCP_SIGN     extends Stageable(Bool)           // sign of input
-  object RCP_ZERO     extends Stageable(Bool)           // input was zero
+  // FXRSQRT pipeline stageables
+  val RSQRT_Y0      = Payload(UInt(16 bits))
+  val RSQRT_HALFCLZ = Payload(UInt(4 bits))
+  val RSQRT_ZERO    = Payload(Bool())
 
-  // FXRSQRT pipeline stageables: execute -> memory
-  object RSQRT_Y0      extends Stageable(UInt(16 bits))  // LUT value
-  object RSQRT_HALFCLZ extends Stageable(UInt(4 bits))   // evenClz / 2
-  object RSQRT_ZERO    extends Stageable(Bool)           // input was zero or negative
+  // FXDIV pipeline stageables
+  val DIV_QUOTIENT = Payload(UInt(32 bits))
+  val DIV_SIGN     = Payload(Bool())
+  val DIV_ZERO     = Payload(Bool())
+  val DIV_OVERFLOW = Payload(Bool())
+}
 
-  // FXDIV pipeline stageables: execute -> memory
-  object DIV_QUOTIENT  extends Stageable(UInt(32 bits))  // unsigned quotient
-  object DIV_SIGN      extends Stageable(Bool)           // result sign
-  object DIV_ZERO      extends Stageable(Bool)           // divisor was zero
-  object DIV_OVERFLOW  extends Stageable(Bool)           // result overflows 31 bits
+// Custom-0 instruction encodings (opcode 0x0B = 0001011)
+object Fx extends AreaObject {
+  import IntRegFile._
 
-  override def setup(pipeline: VexRiscv): Unit = {
-    import pipeline.config._
+  // R-type: funct7=0000000, funct3=NNN, opcode=0001011
+  // TypeR reads RS1, RS2, writes RD
+  val FXMUL   = TypeR(M"0000000----------000-----0001011")
+  val FXCLAMP = TypeR(M"0000000----------100-----0001011")
+  val FXDIV   = TypeR(M"0000000----------110-----0001011")
 
-    val decoderService = pipeline.service(classOf[DecoderService])
+  // FXMACS: reads RS1+RS2, no RD write
+  val FXMACS = SingleDecoding(
+    M"0000000----------001-----0001011",
+    List(RS1, RS2).map(IntRegFile -> _)
+  )
 
-    decoderService.addDefault(IS_FXMUL, False)
-    decoderService.addDefault(IS_FXMACS, False)
-    decoderService.addDefault(IS_FXMACR, False)
-    decoderService.addDefault(IS_FXRCP, False)
-    decoderService.addDefault(IS_FXCLAMP, False)
-    decoderService.addDefault(IS_FXRSQRT, False)
-    decoderService.addDefault(IS_FXDIV, False)
+  // FXMACR: writes RD only, no RS1/RS2
+  val FXMACR = SingleDecoding(
+    M"0000000----------010-----0001011",
+    List(RD).map(IntRegFile -> _)
+  )
 
-    // FXMUL rd, rs1, rs2
-    // funct7=0000000, funct3=000, opcode=0001011
-    decoderService.add(
-      M"0000000----------000-----0001011",
-      List(
-        IS_FXMUL             -> True,
-        REGFILE_WRITE_VALID  -> True,
-        BYPASSABLE_EXECUTE_STAGE -> False,
-        BYPASSABLE_MEMORY_STAGE  -> True,
-        RS1_USE -> True,
-        RS2_USE -> True
-      )
-    )
+  // FXRCP: reads RS1, writes RD
+  val FXRCP = TypeI(M"0000000----------011-----0001011")
 
-    // FXMACS rs1, rs2 (rd ignored, should be x0)
-    // funct7=0000000, funct3=001, opcode=0001011
-    decoderService.add(
-      M"0000000----------001-----0001011",
-      List(
-        IS_FXMACS            -> True,
-        REGFILE_WRITE_VALID  -> False,
-        RS1_USE -> True,
-        RS2_USE -> True
-      )
-    )
+  // FXRSQRT: reads RS1, writes RD
+  val FXRSQRT = TypeI(M"0000000----------101-----0001011")
+}
 
-    // FXMACR rd (rs1/rs2 ignored, should be x0)
-    // funct7=0000000, funct3=010, opcode=0001011
-    decoderService.add(
-      M"0000000----------010-----0001011",
-      List(
-        IS_FXMACR            -> True,
-        REGFILE_WRITE_VALID  -> True,
-        BYPASSABLE_EXECUTE_STAGE -> False,
-        BYPASSABLE_MEMORY_STAGE  -> True,
-        RS1_USE -> False,
-        RS2_USE -> False
-      )
-    )
+class FixedPointMacPlugin(val layer: LaneLayer,
+                          var executeAt: Int = 0,
+                          var writebackAt: Int = 1) extends ExecutionUnitElementSimple(layer) {
+  import FixedPointMacPlugin._
 
-    // FXRCP rd, rs1 (rs2 ignored, should be x0)
-    // funct7=0000000, funct3=011, opcode=0001011
-    // rd = (1 << 32) / rs1   (Q16.16 reciprocal of Q16.16 input)
-    decoderService.add(
-      M"0000000----------011-----0001011",
-      List(
-        IS_FXRCP             -> True,
-        REGFILE_WRITE_VALID  -> True,
-        BYPASSABLE_EXECUTE_STAGE -> False,
-        BYPASSABLE_MEMORY_STAGE  -> True,
-        RS1_USE -> True,
-        RS2_USE -> False
-      )
-    )
+  val logic = during setup new Logic {
+    awaitBuild()
 
-    // FXCLAMP rd, rs1, rs2
-    // funct7=0000000, funct3=100, opcode=0001011
-    // rd = max(0, min(rs1, rs2))  (signed clamp to [0, rs2])
-    decoderService.add(
-      M"0000000----------100-----0001011",
-      List(
-        IS_FXCLAMP           -> True,
-        REGFILE_WRITE_VALID  -> True,
-        BYPASSABLE_EXECUTE_STAGE -> True,
-        BYPASSABLE_MEMORY_STAGE  -> True,
-        RS1_USE -> True,
-        RS2_USE -> True
-      )
-    )
+    // FXMACS must be added BEFORE newWriteback() so it doesn't get
+    // registered with the IntFormatPlugin (it has no RD).
+    add(Fx.FXMACS).decode(IS_FXMACS -> True, IS_FXMUL -> False, IS_FXMACR -> False,
+      IS_FXRCP -> False, IS_FXCLAMP -> False, IS_FXRSQRT -> False, IS_FXDIV -> False)
+    for (op <- List(Fx.FXMACS); spec = layer(op)) {
+      spec.addRsSpec(RS1, executeAt)
+      spec.addRsSpec(RS2, executeAt)
+      spec.setCompletion(executeAt)
+    }
 
-    // FXRSQRT rd, rs1 (rs2 ignored, should be x0)
-    // funct7=0000000, funct3=101, opcode=0001011
-    // rd = 1/sqrt(rs1)  (Q16.16 inverse square root via 512-entry LUT)
-    decoderService.add(
-      M"0000000----------101-----0001011",
-      List(
-        IS_FXRSQRT           -> True,
-        REGFILE_WRITE_VALID  -> True,
-        BYPASSABLE_EXECUTE_STAGE -> False,
-        BYPASSABLE_MEMORY_STAGE  -> True,
-        RS1_USE -> True,
-        RS2_USE -> False
-      )
-    )
+    val formatBus = newWriteback(ifp, writebackAt)
 
-    // FXDIV rd, rs1, rs2
-    // funct7=0000000, funct3=110, opcode=0001011
-    // rd = ((int64_t)rs1 << 16) / rs2   (Q16.16 division)
-    // Division by zero returns 0x7FFFFFFF. Overflow saturates.
-    decoderService.add(
-      M"0000000----------110-----0001011",
-      List(
-        IS_FXDIV             -> True,
-        REGFILE_WRITE_VALID  -> True,
-        BYPASSABLE_EXECUTE_STAGE -> False,
-        BYPASSABLE_MEMORY_STAGE  -> True,
-        RS1_USE -> True,
-        RS2_USE -> True
-      )
-    )
-  }
+    // Register instructions with decoder
+    // FXMUL: R-type, RS1+RS2, writes RD
+    add(Fx.FXMUL).decode(IS_FXMUL -> True, IS_FXMACS -> False, IS_FXMACR -> False,
+      IS_FXRCP -> False, IS_FXCLAMP -> False, IS_FXRSQRT -> False, IS_FXDIV -> False)
+    for (op <- List(Fx.FXMUL); spec = layer(op)) {
+      spec.addRsSpec(RS1, executeAt)
+      spec.addRsSpec(RS2, executeAt)
+    }
 
-  override def build(pipeline: VexRiscv): Unit = {
-    import pipeline._
-    import pipeline.config._
+    // FXMACR: writes RD, no RS1/RS2
+    add(Fx.FXMACR).decode(IS_FXMACR -> True, IS_FXMUL -> False, IS_FXMACS -> False,
+      IS_FXRCP -> False, IS_FXCLAMP -> False, IS_FXRSQRT -> False, IS_FXDIV -> False)
 
-    // 48-bit accumulator for multiply-accumulate dot products.
-    val accumulator = Reg(SInt(48 bits)) init(0)
+    // FXRCP: RS1, writes RD
+    add(Fx.FXRCP).decode(IS_FXRCP -> True, IS_FXMUL -> False, IS_FXMACS -> False,
+      IS_FXMACR -> False, IS_FXCLAMP -> False, IS_FXRSQRT -> False, IS_FXDIV -> False)
+    for (op <- List(Fx.FXRCP); spec = layer(op)) {
+      spec.addRsSpec(RS1, executeAt)
+    }
 
-    // Reciprocal LUT: 256 entries of Q0.16 values.
-    // After normalization, input x_norm is in [1.0, 2.0) (Q1.31, bit 31 always set).
-    // Index = top 8 fractional bits after the implicit leading 1.
-    // LUT[i] = round(65536.0 / (1.0 + (i + 0.5) / 256.0))
-    // Values range from ~65408 (1/1.002) to ~32800 (1/1.998), all fit in 16 bits.
+    // FXCLAMP: RS1+RS2, writes RD
+    add(Fx.FXCLAMP).decode(IS_FXCLAMP -> True, IS_FXMUL -> False, IS_FXMACS -> False,
+      IS_FXMACR -> False, IS_FXRCP -> False, IS_FXRSQRT -> False, IS_FXDIV -> False)
+    for (op <- List(Fx.FXCLAMP); spec = layer(op)) {
+      spec.addRsSpec(RS1, executeAt)
+      spec.addRsSpec(RS2, executeAt)
+    }
+
+    // FXRSQRT: RS1, writes RD
+    add(Fx.FXRSQRT).decode(IS_FXRSQRT -> True, IS_FXMUL -> False, IS_FXMACS -> False,
+      IS_FXMACR -> False, IS_FXRCP -> False, IS_FXCLAMP -> False, IS_FXDIV -> False)
+    for (op <- List(Fx.FXRSQRT); spec = layer(op)) {
+      spec.addRsSpec(RS1, executeAt)
+    }
+
+    // FXDIV: RS1+RS2, writes RD
+    add(Fx.FXDIV).decode(IS_FXDIV -> True, IS_FXMUL -> False, IS_FXMACS -> False,
+      IS_FXMACR -> False, IS_FXRCP -> False, IS_FXCLAMP -> False, IS_FXRSQRT -> False)
+    for (op <- List(Fx.FXDIV); spec = layer(op)) {
+      spec.addRsSpec(RS1, executeAt)
+      spec.addRsSpec(RS2, executeAt)
+    }
+
+    uopRetainer.release()
+
+    // 48-bit accumulator for multiply-accumulate
+    val accumulator = Reg(SInt(48 bits)) init (0)
+
+    // Reciprocal LUT: 256 entries of Q0.16
     val rcpLut = Mem(UInt(16 bits), 256)
     rcpLut.initialContent = (0 until 256).map { i =>
       val x_real = 1.0 + (i + 0.5) / 256.0
-      val rcp = math.round(65536.0 / x_real).toInt
+      val rcp = scala.math.round(65536.0 / x_real).toInt
       BigInt(if (rcp > 0xFFFF) 0xFFFF else rcp)
     }.toArray
 
-    // Inverse square root LUT: 512 entries of Q0.16 values.
-    // After even-CLZ normalization, input is in [0x40000000, 0xFFFFFFFF].
-    // Index = bits [31:23] (9 bits). Indices 0-127 unused, 128-511 active.
-    // LUT[i] = round(2^30 / sqrt((2*i + 1) * 2^22))
+    // Inverse sqrt LUT: 512 entries of Q0.16
     val rsqrtLut = Mem(UInt(16 bits), 512)
     rsqrtLut.initialContent = (0 until 512).map { i =>
       if (i < 128) BigInt(0)
       else {
         val nval = (2.0 * i + 1.0) * (1 << 22).toDouble
-        val rsqrt = math.round(math.pow(2, 30) / math.sqrt(nval)).toInt
+        val rsqrt = scala.math.round(scala.math.pow(2, 30) / scala.math.sqrt(nval)).toInt
         BigInt(if (rsqrt > 0xFFFF) 0xFFFF else rsqrt)
       }
     }.toArray
 
-    // Execute stage: compute partial products for FXMUL/FXMACS (pipelined to memory),
-    // and FXRCP (3-cycle: abs/CLZ, normalize/LUT/DSP, Newton-Raphson/DSP)
-    execute plug new Area {
-      import execute._
+    // ========== Execute stage ==========
+    val exe = new el.Execute(executeAt) {
+      val rs1 = up(el(IntRegFile, RS1))
+      val rs2 = up(el(IntRegFile, RS2))
+      val a = rs1.asSInt
+      val b = rs2.asSInt
 
-      // --- FXMUL/FXMACS pipelined multiply ---
-      // Decompose 32x32 signed multiply into four 17x17 partial products.
-      // Each fits in one 18x18 DSP block on Cyclone V.
-      // Combination happens in memory stage (next cycle).
-      val a = input(RS1).asSInt
-      val b = input(RS2).asSInt
+      // --- FXMUL/FXMACS: 17x17 partial products (pipelined to writeback) ---
+      val aULow = a(15 downto 0).asUInt
+      val bULow = b(15 downto 0).asUInt
+      val aSLow = (False ## aULow).asSInt
+      val bSLow = (False ## bULow).asSInt
+      val aHigh = (a(31) ## a(31 downto 16)).asSInt
+      val bHigh = (b(31) ## b(31 downto 16)).asSInt
 
-      // Split into unsigned low (16-bit) and signed high (17-bit) halves.
-      // Zero-extend low halves to 17-bit signed for mixed-sign DSP multiply.
-      val aULow = a(15 downto 0).asUInt                      // 16-bit unsigned
-      val bULow = b(15 downto 0).asUInt                      // 16-bit unsigned
-      val aSLow = (False ## aULow).asSInt                     // 17-bit signed (zero-extended)
-      val bSLow = (False ## bULow).asSInt                     // 17-bit signed (zero-extended)
-      val aHigh = (a(31) ## a(31 downto 16)).asSInt           // 17-bit signed (sign-extended)
-      val bHigh = (b(31) ## b(31 downto 16)).asSInt           // 17-bit signed (sign-extended)
+      FX_MUL_LL := (aULow * bULow).asBits
+      FX_MUL_LH := (aSLow * bHigh).asBits
+      FX_MUL_HL := (aHigh * bSLow).asBits
+      FX_MUL_HH := (aHigh * bHigh).asBits
 
-      // Four partial products — each 17x17 maps to one 18x18 DSP block
-      insert(FX_MUL_LL) := (aULow * bULow).asBits            // 32-bit unsigned
-      insert(FX_MUL_LH) := (aSLow * bHigh).asBits            // 34-bit signed
-      insert(FX_MUL_HL) := (aHigh * bSLow).asBits            // 34-bit signed
-      insert(FX_MUL_HH) := (aHigh * bHigh).asBits            // 34-bit signed
-
-      // --- FXRCP 3-cycle execute stage ---
-      // Split across 3 execute cycles to meet timing at 100MHz:
-      //   Cycle 0: abs + CLZ (~6ns) -> local registers
-      //   Cycle 1: normalize + LUT + DSP(xNorm*y0) (~8ns) -> local registers
-      //   Cycle 2: Newton-Raphson correction + DSP(y0*corrHi) (~5ns) -> stageables
-      val rcpPhase = Reg(UInt(2 bits)) init(0)
-
-      // Cycle 0 -> Cycle 1 registers
+      // --- FXRCP: 3-cycle execute ---
+      val rcpPhase = Reg(UInt(2 bits)) init (0)
       val rcpAbsReg  = Reg(UInt(32 bits))
       val rcpClzReg  = Reg(UInt(5 bits))
-      val rcpSignReg = Reg(Bool)
-      val rcpZeroReg = Reg(Bool)
-
-      // Cycle 1 -> Cycle 2 registers
+      val rcpSignReg = Reg(Bool())
+      val rcpZeroReg = Reg(Bool())
       val rcpY0Reg   = Reg(UInt(16 bits))
       val rcpXYReg   = Reg(UInt(32 bits))
 
-      // Cycle 0 combinational: abs value, CLZ (from RS1)
+      // CLZ and abs (combinational, used by RCP and RSQRT)
       val isNeg = a.msb
       val isZero = (a === 0)
       val absVal = Mux(isNeg, (-a).asUInt, a.asUInt)
-
       val clz = UInt(5 bits)
       clz := 0
       for (bit <- 0 until 32) {
-        when(absVal(bit)) {
-          clz := U(31 - bit, 5 bits)
-        }
+        when(absVal(bit)) { clz := U(31 - bit, 5 bits) }
       }
 
-      // Cycle 1 combinational: normalize + LUT + DSP (from cycle 0 registers)
+      // Cycle 1 combinational (from cycle 0 registers)
       val normalized = rcpAbsReg |<< rcpClzReg
-      val xNorm = normalized(31 downto 16)  // Q1.15, range [0x8000, 0xFFFF]
+      val xNorm = normalized(31 downto 16)
       val lutIdx = xNorm(14 downto 7)
-      val y0 = rcpLut.readAsync(lutIdx)     // Q0.16
-      val xy = xNorm * y0                   // 32-bit unsigned, Q1.31
+      val y0 = rcpLut.readAsync(lutIdx)
+      val xy = xNorm * y0
 
-      // Cycle 2 combinational: Newton-Raphson correction (from cycle 1 registers)
-      // correction = 2^32 - xy = ~xy + 1 = (2.0 - x*y0) in Q1.31
+      // Cycle 2 combinational (from cycle 1 registers)
       val correction = (~rcpXYReg) + U(1)
-      val corrHi = correction(31 downto 16)   // Q1.15
-      val y1_full = rcpY0Reg * corrHi         // Q0.16 x Q1.15 = Q1.31 (32-bit unsigned)
+      val corrHi = correction(31 downto 16)
+      val y1_full = rcpY0Reg * corrHi
 
-      // Default values for pipeline stageables
-      insert(RCP_Y1)    := U(0, 32 bits)
-      insert(RCP_SHIFT) := U(0, 5 bits)
-      insert(RCP_SIGN)  := False
-      insert(RCP_ZERO)  := False
+      // Default stageable values
+      RCP_Y1    := U(0, 32 bits)
+      RCP_SHIFT := U(0, 5 bits)
+      RCP_SIGN  := False
+      RCP_ZERO  := False
+      RSQRT_Y0      := U(0, 16 bits)
+      RSQRT_HALFCLZ := U(0, 4 bits)
+      RSQRT_ZERO    := False
+      DIV_QUOTIENT := U(0, 32 bits)
+      DIV_SIGN     := False
+      DIV_ZERO     := False
+      DIV_OVERFLOW := False
 
-      // Default values for FXRSQRT pipeline stageables
-      insert(RSQRT_Y0)      := U(0, 16 bits)
-      insert(RSQRT_HALFCLZ) := U(0, 4 bits)
-      insert(RSQRT_ZERO)    := False
+      // Freeze signals: must be proper signals, not constant True literals.
+      // freezeWhen(True) would add a permanently-asserted freeze source.
+      val rcpFreeze = isValid && SEL && IS_FXRCP && (rcpPhase =/= 2)
+      el.freezeWhen(rcpFreeze)
 
-      when(arbitration.isValid && input(IS_FXRCP)) {
+      when(isValid && SEL && IS_FXRCP) {
         when(rcpPhase === 0) {
-          // Cycle 0: abs + CLZ -> registers, stall
           rcpAbsReg  := absVal
           rcpClzReg  := clz
           rcpSignReg := isNeg
           rcpZeroReg := isZero
           rcpPhase   := 1
-          arbitration.haltItself := True
-        } elsewhen(rcpPhase === 1) {
-          // Cycle 1: normalize + LUT + DSP -> registers, stall
-          rcpY0Reg  := y0
-          rcpXYReg  := xy
-          rcpPhase  := 2
-          arbitration.haltItself := True
+        } elsewhen (rcpPhase === 1) {
+          rcpY0Reg := y0
+          rcpXYReg := xy
+          rcpPhase := 2
         } otherwise {
-          // Cycle 2: Newton-Raphson + DSP -> pipeline stageables, no halt
-          insert(RCP_Y1)    := y1_full
-          insert(RCP_SHIFT) := rcpClzReg
-          insert(RCP_SIGN)  := rcpSignReg
-          insert(RCP_ZERO)  := rcpZeroReg
+          RCP_Y1    := y1_full
+          RCP_SHIFT := rcpClzReg
+          RCP_SIGN  := rcpSignReg
+          RCP_ZERO  := rcpZeroReg
         }
       }
+      when(isReady || isCancel) { rcpPhase := 0 }
 
-      // Reset state when instruction advances or is flushed
-      when(!arbitration.isStuck || arbitration.removeIt) {
-        rcpPhase := 0
-      }
-
-      // --- FXCLAMP execute stage (pure combinational, no DSP) ---
-      when(input(IS_FXCLAMP)) {
-        val val_s = input(RS1).asSInt
-        val max_s = input(RS2).asSInt
-        val clamped = Mux(val_s < S(0, 32 bits), S(0, 32 bits),
-                      Mux(val_s > max_s, max_s, val_s))
-        output(REGFILE_WRITE_DATA) := clamped.asBits
-      }
-
-      // --- FXRSQRT 2-cycle execute stage ---
-      // Cycle 0: CLZ -> local register, stall
-      // Cycle 1: even-normalize + 512-entry LUT lookup -> pipeline stageables
-      val rsqrtPhase = Reg(Bool) init(False)
-
-      // Cycle 0 -> Cycle 1 registers
+      // --- FXRSQRT: 2-cycle execute ---
+      val rsqrtPhase = Reg(Bool()) init (False)
       val rsqrtClzReg  = Reg(UInt(5 bits))
       val rsqrtAbsReg  = Reg(UInt(32 bits))
-      val rsqrtZeroReg = Reg(Bool)
+      val rsqrtZeroReg = Reg(Bool())
 
-      // Cycle 1 combinational: even-normalize + LUT lookup
-      val rsqrtEvenClz = rsqrtClzReg & U(0x1E, 5 bits)    // clz & ~1 (round down to even)
+      val rsqrtEvenClz = rsqrtClzReg & U(0x1E, 5 bits)
       val rsqrtNormalized = rsqrtAbsReg |<< rsqrtEvenClz
-      val rsqrtLutIdx = rsqrtNormalized(31 downto 23)       // 9-bit index
+      val rsqrtLutIdx = rsqrtNormalized(31 downto 23)
       val rsqrtY0 = rsqrtLut.readAsync(rsqrtLutIdx)
-      val rsqrtHalfClz = (rsqrtEvenClz >> 1).resize(4)     // evenClz / 2, range 0..15
+      val rsqrtHalfClz = (rsqrtEvenClz >> 1).resize(4)
 
-      when(arbitration.isValid && input(IS_FXRSQRT)) {
+      val rsqrtFreeze = isValid && SEL && IS_FXRSQRT && !rsqrtPhase
+      el.freezeWhen(rsqrtFreeze)
+
+      when(isValid && SEL && IS_FXRSQRT) {
         when(!rsqrtPhase) {
-          // Cycle 0: CLZ + abs -> registers, stall
           rsqrtAbsReg  := absVal
           rsqrtClzReg  := clz
-          rsqrtZeroReg := isZero || isNeg   // negative/zero -> return 0x7FFFFFFF
+          rsqrtZeroReg := isZero || isNeg
           rsqrtPhase   := True
-          arbitration.haltItself := True
         } otherwise {
-          // Cycle 1: normalize + LUT -> stageables, proceed to memory
-          insert(RSQRT_Y0)      := rsqrtY0
-          insert(RSQRT_HALFCLZ) := rsqrtHalfClz
-          insert(RSQRT_ZERO)    := rsqrtZeroReg
+          RSQRT_Y0      := rsqrtY0
+          RSQRT_HALFCLZ := rsqrtHalfClz
+          RSQRT_ZERO    := rsqrtZeroReg
         }
       }
+      when(isReady || isCancel) { rsqrtPhase := False }
 
-      // Reset rsqrt state when instruction advances or is flushed
-      when(!arbitration.isStuck || arbitration.removeIt) {
-        rsqrtPhase := False
-      }
+      // --- FXDIV: 34-cycle execute ---
+      val divCounter    = Reg(UInt(6 bits)) init (0)
+      val divRemainder  = Reg(UInt(33 bits))
+      val divDividend   = Reg(UInt(32 bits))
+      val divQuotient   = Reg(UInt(32 bits))
+      val divDivisor    = Reg(UInt(32 bits))
+      val divSignReg    = Reg(Bool())
+      val divZeroReg    = Reg(Bool())
+      val divOverflowReg = Reg(Bool())
 
-      // --- FXDIV multi-cycle execute stage ---
-      // Sequential restoring division: rd = ((int64_t)rs1 << 16) / rs2
-      // 35-cycle latency: 1 setup + 32 division steps + 1 register latch + memory.
-      // Uses ~150 ALMs (48-bit subtractor, registers, control), 0 DSP, 0 BRAM.
-      val divCounter = Reg(UInt(6 bits)) init(0)
+      val divFreeze = isValid && SEL && IS_FXDIV && (divCounter =/= 33)
+      el.freezeWhen(divFreeze)
 
-      // Division state registers
-      val divRemainder  = Reg(UInt(33 bits))   // partial remainder (33 bits for subtract borrow)
-      val divDividend   = Reg(UInt(32 bits))   // remaining dividend bits to shift in
-      val divQuotient   = Reg(UInt(32 bits))   // accumulated quotient bits
-      val divDivisor    = Reg(UInt(32 bits))   // |rs2|
-      val divSignReg    = Reg(Bool)
-      val divZeroReg    = Reg(Bool)
-      val divOverflowReg = Reg(Bool)
-
-      // Default values for pipeline stageables
-      insert(DIV_QUOTIENT) := U(0, 32 bits)
-      insert(DIV_SIGN)     := False
-      insert(DIV_ZERO)     := False
-      insert(DIV_OVERFLOW) := False
-
-      when(arbitration.isValid && input(IS_FXDIV)) {
+      when(isValid && SEL && IS_FXDIV) {
         when(divCounter === 0) {
-          // Setup: compute absolute values, check zero/overflow, initialize
           val aSign = a.msb
           val bSign = b.msb
           val aAbs = Mux(aSign, (-a).asUInt, a.asUInt)
           val bAbs = Mux(bSign, (-b).asUInt, b.asUInt)
-
-          // Dividend = |a| << 16: upper 16 bits go to remainder, lower 32 to dividend reg
-          divRemainder  := aAbs(31 downto 16).resize(33)
-          divDividend   := (aAbs(15 downto 0) ## U(0, 16 bits)).asUInt
-          divQuotient   := U(0)
-          divDivisor    := bAbs
-          divSignReg    := aSign ^ bSign
-          divZeroReg    := (b === 0)
-          // Overflow check: if upper 16 bits of |a| >= |b|, quotient > 32 bits
+          divRemainder   := aAbs(31 downto 16).resize(33)
+          divDividend    := (aAbs(15 downto 0) ## U(0, 16 bits)).asUInt
+          divQuotient    := U(0)
+          divDivisor     := bAbs
+          divSignReg     := aSign ^ bSign
+          divZeroReg     := (b === 0)
           divOverflowReg := (aAbs(31 downto 16).resize(32) >= bAbs) && (b =/= 0)
-
-          divCounter := 1
-          arbitration.haltItself := True
-        } elsewhen(divCounter <= 32) {
-          // Division step: shift-and-subtract (restoring division)
-          // Shift remainder left by 1, bring in next dividend MSB
+          divCounter     := 1
+        } elsewhen (divCounter <= 32) {
           val shiftedRem = (divRemainder(31 downto 0) ## divDividend.msb).asUInt
           val diff = shiftedRem - divDivisor.resize(33)
-
           when(!diff.msb) {
-            // remainder >= divisor: subtract and set quotient bit
             divRemainder := diff
             divQuotient  := (divQuotient(30 downto 0) ## True).asUInt
           } otherwise {
-            // remainder < divisor: keep remainder, clear quotient bit
             divRemainder := shiftedRem
             divQuotient  := (divQuotient(30 downto 0) ## False).asUInt
           }
-
           divDividend := (divDividend |<< 1).resize(32)
           divCounter  := divCounter + 1
-
-          // Halt through ALL 32 division steps (counter 1..32)
-          // On counter=32 the last quotient bit is computed and latched at clock edge
-          arbitration.haltItself := True
-        } elsewhen(divCounter === 33) {
-          // Writeback cycle: divQuotient register now has all 32 bits latched
-          // Write to pipeline stageables and release (no halt)
-          insert(DIV_QUOTIENT) := divQuotient
-          insert(DIV_SIGN)     := divSignReg
-          insert(DIV_ZERO)     := divZeroReg
-          insert(DIV_OVERFLOW) := divOverflowReg
+        } elsewhen (divCounter === 33) {
+          DIV_QUOTIENT := divQuotient
+          DIV_SIGN     := divSignReg
+          DIV_ZERO     := divZeroReg
+          DIV_OVERFLOW := divOverflowReg
         }
       }
-
-      // Reset division state when instruction advances or is flushed
-      when(!arbitration.isStuck || arbitration.removeIt) {
-        divCounter := 0
-      }
+      when(isReady || isCancel) { divCounter := 0 }
     }
 
-    // Memory stage: combine partial products, write results, update accumulator.
-    // FXRCP final step: de-normalize + saturate + sign.
-    memory plug new Area {
-      import memory._
+    // ========== Writeback stage ==========
+    val wb = new el.Execute(writebackAt) {
+      val result = Bits(32 bits)
+      result := B(0, 32 bits)
 
-      // --- Combine partial products for FXMUL/FXMACS ---
-      // product = LL + (LH + HL) * 2^16 + HH * 2^32
-      // We need (product >> 16)[31:0] = LL[31:16] + LH + HL + (HH << 16)
-      // Computed in 48-bit signed arithmetic to handle carries correctly.
-      val ll = input(FX_MUL_LL).asUInt    // 32-bit unsigned
-      val lh = input(FX_MUL_LH).asSInt   // 34-bit signed
-      val hl = input(FX_MUL_HL).asSInt   // 34-bit signed
-      val hh = input(FX_MUL_HH).asSInt   // 34-bit signed
+      // --- Combine FXMUL/FXMACS partial products ---
+      val ll = FX_MUL_LL.asUInt
+      val lh = FX_MUL_LH.asSInt
+      val hl = FX_MUL_HL.asSInt
+      val hh = FX_MUL_HH.asSInt
 
-      val fxSum = (False ## ll(31 downto 16)).asSInt.resize(48) +  // LL >> 16, unsigned -> signed
-                  lh.resize(48) +                                   // sign-extend to 48
-                  hl.resize(48) +                                   // sign-extend to 48
-                  (hh.resize(32) |<< 16)                            // HH << 16 -> 48-bit
+      val fxSum = (False ## ll(31 downto 16)).asSInt.resize(48) +
+                  lh.resize(48) +
+                  hl.resize(48) +
+                  (hh.resize(32) |<< 16)
+      val fxProduct = fxSum(31 downto 0)
 
-      val fxProduct = fxSum(31 downto 0)   // Q16.16 result (SInt slice of SInt)
-
-      when(input(IS_FXMUL)) {
-        output(REGFILE_WRITE_DATA) := fxProduct.asBits
+      when(SEL && IS_FXMUL) {
+        result := fxProduct.asBits
       }
 
-      when(input(IS_FXMACS) && arbitration.isFiring) {
+      // FXMACS: accumulate (no register writeback)
+      when(isValid && SEL && IS_FXMACS && !isCancel) {
         accumulator := accumulator + fxProduct.resize(48)
       }
 
-      when(input(IS_FXMACR)) {
-        output(REGFILE_WRITE_DATA) := accumulator(31 downto 0).asBits
+      // FXMACR: read accumulator, reset
+      when(SEL && IS_FXMACR) {
+        result := accumulator(31 downto 0).asBits
       }
-      when(input(IS_FXMACR) && arbitration.isFiring) {
+      when(isValid && SEL && IS_FXMACR && !isCancel) {
         accumulator := 0
       }
 
-      // --- FXRCP memory stage: de-normalize + saturate + sign ---
-      // Newton-Raphson was completed in execute cycle 2.
-      // Only barrel shift, overflow check, and sign application remain.
-      when(input(IS_FXRCP)) {
-        val y1   = input(RCP_Y1)       // Newton-Raphson result (Q1.31)
-        val clz  = input(RCP_SHIFT)
-        val sign = input(RCP_SIGN)
-        val zero = input(RCP_ZERO)
-
-        // De-normalize: convert from reciprocal of normalized value to Q16.16.
-        //   result = y1 * 2^(clz - 30)
-        //          = y1 >> (30 - clz)  when clz <= 30
-        //          = y1 << (clz - 30)  when clz > 30 (only clz=31)
-        val needLeftShift = (clz > U(30))
-        val shiftRight = U(30, 5 bits) - clz     // used when clz <= 30
-        val resultRaw = Mux(needLeftShift,
-          y1 |<< U(1),                            // clz=31: shift left by 1
-          y1 |>> shiftRight                        // clz<=30: shift right
-        )
-
-        // Saturate on overflow: if bit 31 is set, the unsigned result
-        // exceeds the signed positive range. Clamp to 0x7FFFFFFF.
-        val overflow = resultRaw(31)
-        val resultClamped = Mux(overflow, U(0x7FFFFFFF, 32 bits), resultRaw)
-
-        // Apply sign and handle division by zero (return 0x7FFFFFFF)
-        val signedResult = SInt(32 bits)
-        signedResult := Mux(zero,
-          S(0x7FFFFFFF, 32 bits),
-          Mux(sign, -resultClamped.asSInt, resultClamped.asSInt)
-        )
-
-        output(REGFILE_WRITE_DATA) := signedResult.asBits
+      // --- FXCLAMP (combinational, single cycle result) ---
+      when(SEL && IS_FXCLAMP) {
+        // Read RS1/RS2 at this stage too (they pipeline through)
+        val rs1 = up(el(IntRegFile, RS1))
+        val rs2 = up(el(IntRegFile, RS2))
+        val val_s = rs1.asSInt
+        val max_s = rs2.asSInt
+        val clamped = Mux(val_s < S(0, 32 bits), S(0, 32 bits),
+                      Mux(val_s > max_s, max_s, val_s))
+        result := clamped.asBits
       }
 
-      // --- FXRSQRT memory stage: de-normalize + zero handling ---
-      when(input(IS_FXRSQRT)) {
-        val y0      = input(RSQRT_Y0)       // 16-bit LUT value
-        val halfClz = input(RSQRT_HALFCLZ)  // 0..15
-        val zero    = input(RSQRT_ZERO)
+      // --- FXRCP memory stage ---
+      when(SEL && IS_FXRCP) {
+        val y1   = RCP_Y1
+        val clzV = RCP_SHIFT
+        val sign = RCP_SIGN
+        val zero = RCP_ZERO
 
-        // De-normalize: result = y0 * 2^(halfClz - 6)
-        //   halfClz >= 6: shift left by (halfClz - 6), max shift = 9
-        //   halfClz < 6:  shift right by (6 - halfClz), max shift = 6
+        val needLeftShift = (clzV > U(30))
+        val shiftRight = U(30, 5 bits) - clzV
+        val resultRaw = Mux(needLeftShift,
+          y1 |<< U(1),
+          y1 |>> shiftRight
+        )
+        val overflow = resultRaw(31)
+        val resultClamped = Mux(overflow, U(0x7FFFFFFFL, 32 bits), resultRaw)
+
+        val signedResult = Mux(zero,
+          S(0x7FFFFFFFL, 32 bits),
+          Mux(sign, -resultClamped.asSInt, resultClamped.asSInt)
+        )
+        result := signedResult.asBits
+      }
+
+      // --- FXRSQRT memory stage ---
+      when(SEL && IS_FXRSQRT) {
+        val y0V     = RSQRT_Y0
+        val halfClz = RSQRT_HALFCLZ
+        val zero    = RSQRT_ZERO
+
         val shiftLeft = (halfClz >= U(6))
         val shiftAmt = Mux(shiftLeft,
           (halfClz - U(6, 4 bits)),
           (U(6, 4 bits) - halfClz)
         )
         val resultRaw = Mux(shiftLeft,
-          y0.resize(32) |<< shiftAmt,
-          y0.resize(32) |>> shiftAmt
+          y0V.resize(32) |<< shiftAmt,
+          y0V.resize(32) |>> shiftAmt
         )
-
-        // Zero/negative input: return 0x7FFFFFFF
-        output(REGFILE_WRITE_DATA) := Mux(zero,
-          B(0x7FFFFFFF, 32 bits),
-          resultRaw.asBits
-        )
+        result := Mux(zero, B(0x7FFFFFFF, 32 bits), resultRaw.asBits)
       }
 
-      // --- FXDIV memory stage: apply sign, handle zero/overflow ---
-      when(input(IS_FXDIV)) {
-        val quotient = input(DIV_QUOTIENT)
-        val sign     = input(DIV_SIGN)
-        val zero     = input(DIV_ZERO)
-        val overflow = input(DIV_OVERFLOW)
+      // --- FXDIV memory stage ---
+      when(SEL && IS_FXDIV) {
+        val quotient = DIV_QUOTIENT
+        val sign     = DIV_SIGN
+        val zero     = DIV_ZERO
+        val overflow = DIV_OVERFLOW
 
-        // Apply sign and handle special cases
+        val satNeg = S(-0x7FFFFFFFL, 32 bits)  // 0x80000001 = Int.MinValue + 1
+        val satPos = S(0x7FFFFFFFL, 32 bits)
         val signedResult = SInt(32 bits)
-        when(zero) {
-          // Division by zero: return max positive or min negative based on dividend sign
-          signedResult := Mux(sign, S(0x80000001, 32 bits), S(0x7FFFFFFF, 32 bits))
-        } elsewhen(overflow) {
-          // Overflow: saturate
-          signedResult := Mux(sign, S(0x80000001, 32 bits), S(0x7FFFFFFF, 32 bits))
+        when(zero || overflow) {
+          signedResult := Mux(sign, satNeg, satPos)
         } otherwise {
           signedResult := Mux(sign, -quotient.asSInt, quotient.asSInt)
         }
-
-        output(REGFILE_WRITE_DATA) := signedResult.asBits
+        result := signedResult.asBits
       }
+
+      // Write result to register file
+      formatBus.valid := SEL
+      formatBus.payload := result
     }
   }
 }

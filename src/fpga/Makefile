@@ -9,7 +9,7 @@ export PATH := $(QUARTUS_DIR):$(PATH)
 # Output files
 SOF_FILE = output_files/$(PROJECT).sof
 RBF_FILE = output_files/$(PROJECT).rbf
-RELEASE_RBF = ../../release/Cores/ThinkElastic.PocketQuake/bitstream.rbf_r
+RELEASE_RBF = ../../release/Cores/ThinkElastic.PocketSM64/bitstream.rbf_r
 
 # Default target
 all: build

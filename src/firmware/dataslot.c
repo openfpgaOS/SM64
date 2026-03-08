@@ -2,75 +2,87 @@
  * Data Slot interface for Analogue Pocket
  *
  * Implements CPU-controlled data slot operations using APF target commands.
+ * Ported from PocketQuake's robust implementation with cycle-counter timeouts
+ * and D-cache coherency via uncached SDRAM alias.
  */
 
 #include "dataslot.h"
 #include "libc/libc.h"
 #include "terminal.h"
 
-/* Parameter buffer in SDRAM (placed at a known location) */
-/* We use the end of SDRAM test region to avoid conflicts */
-#define PARAM_BUFFER_ADDR   0x10F00000  /* CPU address for param struct */
-#define RESP_BUFFER_ADDR    0x10F01000  /* CPU address for response struct */
+/* Set to 1 for verbose dataslot debug output (slow — prints on every read) */
+#define DS_DEBUG 0
+#if DS_DEBUG
+#define DS_LOG(...) term_printf(__VA_ARGS__)
+#else
+#define DS_LOG(...) do {} while(0)
+#endif
 
-/* Timeout for operations (in loop iterations) */
-/* 15 seconds at 133MHz with ~10 cycles/loop = 200M iterations */
-#define TIMEOUT_LOOPS       200000000
+/* Parameter buffer in SDRAM (placed outside heap region) */
+#define PARAM_BUFFER_ADDR   0x13E00000  /* CPU address for param struct */
+#define RESP_BUFFER_ADDR    0x13E01000  /* CPU address for response struct */
 
+/* Timeout in CPU cycles (~15 seconds at 100 MHz).
+ * Uses hardware cycle counter (sysreg, not SDRAM) so the timeout works even
+ * when bridge_dma_active blocks all SDRAM access. */
+#define TIMEOUT_CYCLES      1500000000u
+
+/* Read the hardware cycle counter (sysreg at 0x40000004).
+ * This is NOT in SDRAM, so it works even when bridge_dma_active blocks SDRAM. */
+static inline uint32_t read_cycles(void) {
+    return *(volatile uint32_t *)(0x40000004);
+}
+
+/* Wait for the current (already-issued) command to complete.
+ *
+ * Protocol: after DS_COMMAND is written, wait for ACK then DONE.
+ *
+ * Stale DONE from a previous command is harmless because:
+ *   - Writing DS_COMMAND triggers cpu_ds_start in core_top, which resets
+ *     ds_done_ram_sync -> target_dataslot_done_safe goes low in ~3 clk cycles.
+ *   - Bridge ACK takes ~11+ cycles (CDC + bridge latency + CDC back).
+ *   - By the time we observe ACK, stale DONE is guaranteed to be 0 already.
+ *   - Then we wait for the NEW DONE from this command's DMA completion. */
 __attribute__((section(".text.boot")))
 int dataslot_wait_complete(void) {
-    volatile int timeout = TIMEOUT_LOOPS;
-    uint32_t status;
+    uint32_t start;
 
-    term_printf("wait: initial status=%x\n", DS_STATUS);
+    DS_LOG("wait: status=%x\n", DS_STATUS);
 
-    /* First, if ACK is already high from previous command, wait for it to clear.
-     * This proves the bridge received our new command and cleared old status. */
-    status = DS_STATUS;
-    if (status & DS_STATUS_ACK) {
-        term_printf("wait: ACK high, waiting to clear\n");
-        while (DS_STATUS & DS_STATUS_ACK) {
-            if (--timeout <= 0) {
-                term_printf("wait: timeout at clear, t=%d\n", timeout);
-                return -3;
-            }
-        }
-        term_printf("wait: ACK cleared\n");
-    }
-
-    /* Wait for this command's ack */
-    timeout = TIMEOUT_LOOPS;
+    /* Wait for this command's ACK */
+    start = read_cycles();
     while (!(DS_STATUS & DS_STATUS_ACK)) {
-        if (--timeout <= 0) {
-            term_printf("wait: timeout at ack, t=%d\n", timeout);
+        if (read_cycles() - start > TIMEOUT_CYCLES) {
+            DS_LOG("wait: timeout at ack, s=%x\n", DS_STATUS);
             return -1;
         }
     }
-    term_printf("wait: got ACK\n");
+    DS_LOG("wait: got ACK\n");
 
-    /* Wait for done */
-    timeout = TIMEOUT_LOOPS;
+    /* Wait for DONE (from the current command — stale DONE is gone) */
+    start = read_cycles();
     while (!(DS_STATUS & DS_STATUS_DONE)) {
-        if (--timeout <= 0) {
-            term_printf("wait: timeout at done, t=%d s=%x\n", timeout, DS_STATUS);
+        if (read_cycles() - start > TIMEOUT_CYCLES) {
+            DS_LOG("wait: timeout at done, s=%x\n", DS_STATUS);
             return -2;
         }
     }
-    term_printf("wait: got DONE\n");
+    DS_LOG("wait: got DONE\n");
 
     /* Check error code */
     uint32_t final_status = DS_STATUS;
     int err = (final_status & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
-    term_printf("wait: final status=%x err=%d\n", final_status, err);
+    DS_LOG("wait: final status=%x err=%d\n", final_status, err);
     return err ? -err : 0;
 }
 
 __attribute__((section(".text.boot")))
 int dataslot_open_file(const char *filename, uint32_t flags, uint32_t size) {
-    /* Build parameter struct in SDRAM */
-    dataslot_open_param_t *param = (dataslot_open_param_t *)PARAM_BUFFER_ADDR;
+    /* Build parameter struct through the uncached SDRAM alias so the bridge
+     * reads correct data from physical SDRAM. */
+    dataslot_open_param_t *param = (dataslot_open_param_t *)SDRAM_UNCACHED(PARAM_BUFFER_ADDR);
 
-    /* Clear and fill the struct */
+    /* Clear and fill the struct — each byte goes directly to physical SDRAM */
     memset(param, 0, sizeof(*param));
     strncpy(param->filename, filename, 255);
     param->filename[255] = '\0';
@@ -99,10 +111,11 @@ int dataslot_read(uint32_t slot_id, uint32_t offset, void *dest, uint32_t length
 
     uint32_t bridge_addr = CPU_TO_BRIDGE_ADDR(dest_addr);
 
-    /* Debug: print parameters */
-    term_printf("DS: slot=%d off=%x br=%x len=%x\n",
+    DS_LOG("DS: slot=%d off=%x br=%x len=%x\n",
                 slot_id, offset, bridge_addr, length);
-    term_printf("DS: status before=%x\n", DS_STATUS);
+
+    /* Drain the CPU store buffer before bridge writes to SDRAM */
+    __asm__ volatile("fence");
 
     /* Set up registers */
     DS_SLOT_ID = slot_id;
@@ -114,16 +127,7 @@ int dataslot_read(uint32_t slot_id, uint32_t offset, void *dest, uint32_t length
     DS_COMMAND = DS_CMD_READ;
 
     /* Wait for completion */
-    int result = dataslot_wait_complete();
-
-    term_printf("DS: status after=%x result=%d\n", DS_STATUS, result);
-
-    /* Debug: print first 16 bytes of destination */
-    volatile uint8_t *p = (volatile uint8_t *)dest;
-    term_printf("DS: data=%02x%02x%02x%02x %02x%02x%02x%02x\n",
-                p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]);
-
-    return result;
+    return dataslot_wait_complete();
 }
 
 __attribute__((section(".text.boot")))
@@ -149,25 +153,37 @@ int dataslot_write(uint16_t slot_id, uint32_t offset, const void *src, uint32_t 
 
 __attribute__((section(".text.boot")))
 int32_t dataslot_load(uint16_t slot_id, void *dest, uint32_t max_length) {
-    /* For now, just read the requested amount */
-    /* TODO: Could query slot size first if needed */
-    int result = dataslot_read(slot_id, 0, dest, max_length);
-    if (result < 0) return result;
-    return (int32_t)max_length;
+    if (dest == NULL) {
+        return -1;
+    }
+
+    /* Cache-safe slot load:
+     * DMA into shared SDRAM bounce buffer, then copy from uncached alias. */
+    uint8_t *dst = (uint8_t *)dest;
+    uint32_t done = 0;
+    while (done < max_length) {
+        uint32_t chunk = max_length - done;
+        if (chunk > DMA_CHUNK_SIZE)
+            chunk = DMA_CHUNK_SIZE;
+
+        int result = dataslot_read(slot_id, done, (void *)DMA_BUFFER, chunk);
+        if (result < 0)
+            return result;
+
+        memcpy(dst + done, SDRAM_UNCACHED(DMA_BUFFER), chunk);
+        done += chunk;
+    }
+
+    return (int32_t)done;
 }
 
 __attribute__((section(".text.boot")))
 int dataslot_get_size(uint16_t slot_id, uint32_t *size_out) {
-    /* TODO: Implement proper slot size query via APF protocol */
-    /* For now, return a large fixed size based on slot ID */
     if (size_out == NULL) return -1;
 
     switch (slot_id) {
         case 0:  /* SM64 binary */
-            *size_out = 4 * 1024 * 1024;   /* 4 MB */
-            break;
-        case 1:  /* PAK data */
-            *size_out = 20 * 1024 * 1024;  /* 20 MB */
+            *size_out = 10 * 1024 * 1024;  /* 10 MB */
             break;
         default:
             *size_out = 1 * 1024 * 1024;   /* 1 MB default */

@@ -1,1249 +1,749 @@
 //
-// VexRiscv CPU System (Minimal)
-// - VexRiscv RISC-V CPU with Wishbone interface
-// - 64KB RAM for program/data (using block RAM)
-// - Memory-mapped terminal at 0x20000000
-// - SDRAM access at 0x10000000 (64MB) - includes framebuffer
-// - PSRAM access at 0x30000000 (16MB) - cram0
-// - PSRAM access at 0x31000000 (16MB) - cram1
-// - System registers at 0x40000000
+// VexiiRiscv CPU System — AXI4 bus routing
+// - VexiiRiscv RISC-V CPU with 3-bus architecture:
+//   FetchL1Axi4 (I-cache, read-only)
+//   LsuL1Axi4   (D-cache, read+write)
+//   LsuPlugin IO (uncached, single-beat cmd/rsp)
+// - Per-bus address decode → {SDRAM, PSRAM, Local} AXI4 masters
+//
+// All peripheral/local logic (BRAM, colormap, system registers, CDC, terminal,
+// DMA/Span/ATM/Audio/Link dispatch) lives in axi_periph_slave.v.
 //
 
 `default_nettype none
 
 module cpu_system (
-    input wire clk,           // CPU clock (currently 66 MHz, same as SDRAM controller)
-    input wire clk_74a,       // Bridge clock (74.25 MHz) - for APF interface
-    input wire clk_video,     // Video clock (12.288 MHz) - for BRAM framebuffer read port
+    input wire clk,           // CPU clock (100 MHz)
     input wire reset_n,
-    input wire dataslot_allcomplete,  // All data slots loaded by APF
-    input wire vsync,         // Vertical sync for buffer swap timing
-    input wire [31:0] cont1_key,      // Controller 1 key bitmap (from APF pad controller)
-    input wire [31:0] cont1_joy,      // Controller 1 analog sticks
-    input wire [15:0] cont1_trig,     // Controller 1 analog triggers
-    input wire [31:0] cont2_key,      // Controller 2 key bitmap (from APF pad controller)
-    input wire [31:0] cont2_joy,      // Controller 2 analog sticks
-    input wire [15:0] cont2_trig,     // Controller 2 analog triggers
 
-    // Terminal memory interface
-    output wire        term_mem_valid,
-    output wire [31:0] term_mem_addr,
-    output wire [31:0] term_mem_wdata,
-    output wire [3:0]  term_mem_wstrb,
-    input wire  [31:0] term_mem_rdata,
-    input wire         term_mem_ready,
+    // SDRAM AXI4 master interface (to axi_sdram_slave via core_top)
+    output reg         m_sdram_arvalid,
+    input  wire        m_sdram_arready,
+    output reg  [31:0] m_sdram_araddr,
+    output reg  [7:0]  m_sdram_arlen,
 
-    // SDRAM word interface (directly to io_sdram via core_top)
-    // CPU and SDRAM controller run at same clock (currently 66 MHz)
-    output reg         sdram_rd,
-    output reg         sdram_wr,
-    output reg  [23:0] sdram_addr,
-    output reg  [31:0] sdram_wdata,
-    output reg  [3:0]  sdram_wstrb,  // Byte enables for SDRAM writes
-    output reg  [2:0]  sdram_burst_len,  // Burst length: 0=single word, 7=8 words (cache line fill)
-    input wire  [31:0] sdram_rdata,
-    input wire         sdram_busy,
-    input wire         sdram_accepted,     // Pulses when arbiter actually forwards CPU command
-    input wire         sdram_rdata_valid,  // Pulses when read data is valid
+    input  wire        m_sdram_rvalid,
+    input  wire [31:0] m_sdram_rdata,
+    input  wire [1:0]  m_sdram_rresp,
+    input  wire        m_sdram_rlast,
 
-    // PSRAM0 word interface (to psram_controller via core_top, CRAM0)
-    output reg         psram_rd,
-    output reg         psram_wr,
-    output reg  [21:0] psram_addr,         // 22-bit word address (16MB addressable, CRAM0)
-    output reg  [31:0] psram_wdata,
-    output reg  [3:0]  psram_wstrb,        // Byte enables for PSRAM writes
-    input wire  [31:0] psram_rdata,
-    input wire         psram_busy,
-    input wire         psram_rdata_valid,  // Pulses when read data is valid
+    output reg         m_sdram_awvalid,
+    input  wire        m_sdram_awready,
+    output reg  [31:0] m_sdram_awaddr,
+    output reg  [7:0]  m_sdram_awlen,
 
-    // PSRAM1 word interface (to second psram_controller via core_top, CRAM1)
-    output reg         psram1_rd,
-    output reg         psram1_wr,
-    output reg  [21:0] psram1_addr,        // 22-bit word address (16MB addressable, CRAM1)
-    output reg  [31:0] psram1_wdata,
-    output reg  [3:0]  psram1_wstrb,       // Byte enables for PSRAM1 writes
-    input wire  [31:0] psram1_rdata,
-    input wire         psram1_busy,
-    input wire         psram1_rdata_valid, // Pulses when read data is valid
+    output reg         m_sdram_wvalid,
+    input  wire        m_sdram_wready,
+    output reg  [31:0] m_sdram_wdata,
+    output reg  [3:0]  m_sdram_wstrb,
+    output reg         m_sdram_wlast,
 
-    // Display control outputs
-    output wire        display_mode,       // 0=terminal overlay, 1=framebuffer only
-    output wire [24:0] fb_display_addr,    // SDRAM word address for video scanout (legacy)
+    input  wire        m_sdram_bvalid,
+    input  wire [1:0]  m_sdram_bresp,
 
-    // BRAM framebuffer read port (directly to video scanout, clk_video domain)
-    input wire  [12:0] fb_bram_rd_addr,
-    output wire [31:0] fb_bram_rd_data,
-    output wire        fb_display_buf_sel_out,
+    // PSRAM AXI4 master interface (to axi_psram_slave via core_top)
+    output reg         m_psram_arvalid,
+    input  wire        m_psram_arready,
+    output reg  [31:0] m_psram_araddr,
+    output reg  [7:0]  m_psram_arlen,
 
-    // Palette write interface (directly to video_scanout_indexed)
-    output reg         pal_wr,
-    output reg  [7:0]  pal_addr,
-    output reg  [23:0] pal_data,
+    input  wire        m_psram_rvalid,
+    input  wire [31:0] m_psram_rdata,
+    input  wire [1:0]  m_psram_rresp,
+    input  wire        m_psram_rlast,
 
-    // Target dataslot interface (directly to core_bridge_cmd via core_top)
-    output reg         target_dataslot_read,
-    output reg         target_dataslot_write,
-    output reg         target_dataslot_openfile,
-    output reg  [15:0] target_dataslot_id,
-    output reg  [31:0] target_dataslot_slotoffset,
-    output reg  [31:0] target_dataslot_bridgeaddr,
-    output reg  [31:0] target_dataslot_length,
-    output reg  [31:0] target_buffer_param_struct,
-    output reg  [31:0] target_buffer_resp_struct,
-    input wire         target_dataslot_ack,
-    input wire         target_dataslot_done,
-    input wire  [2:0]  target_dataslot_err,
+    output reg         m_psram_awvalid,
+    input  wire        m_psram_awready,
+    output reg  [31:0] m_psram_awaddr,
+    output reg  [7:0]  m_psram_awlen,
 
-    // Audio output interface (directly to audio_output)
-    output reg         audio_sample_wr,
-    output reg  [31:0] audio_sample_data,
-    input  wire [11:0] audio_fifo_level,
-    input  wire        audio_fifo_full,
+    output reg         m_psram_wvalid,
+    input  wire        m_psram_wready,
+    output reg  [31:0] m_psram_wdata,
+    output reg  [3:0]  m_psram_wstrb,
+    output reg         m_psram_wlast,
 
-    // Link MMIO interface (to link_mmio)
-    output reg         link_reg_wr,
-    output reg         link_reg_rd,
-    output reg  [4:0]  link_reg_addr,
-    output reg  [31:0] link_reg_wdata,
-    input  wire [31:0] link_reg_rdata
+    input  wire        m_psram_bvalid,
+    input  wire [1:0]  m_psram_bresp,
+
+    // Local peripheral AXI4 master interface (to axi_periph_slave via core_top)
+    output reg         m_local_arvalid,
+    input  wire        m_local_arready,
+    output reg  [31:0] m_local_araddr,
+    output reg  [7:0]  m_local_arlen,
+
+    input  wire        m_local_rvalid,
+    input  wire [31:0] m_local_rdata,
+    input  wire [1:0]  m_local_rresp,
+    input  wire        m_local_rlast,
+
+    output reg         m_local_awvalid,
+    input  wire        m_local_awready,
+    output reg  [31:0] m_local_awaddr,
+    output reg  [7:0]  m_local_awlen,
+
+    output reg         m_local_wvalid,
+    input  wire        m_local_wready,
+    output reg  [31:0] m_local_wdata,
+    output reg  [3:0]  m_local_wstrb,
+    output reg         m_local_wlast,
+
+    input  wire        m_local_bvalid,
+    input  wire [1:0]  m_local_bresp
 );
 
 // ============================================
-// VexRiscv Wishbone signals
+// VexiiRiscv AXI4 signals
 // ============================================
 
-// Instruction bus (Wishbone)
-wire        ibus_cyc;
-wire        ibus_stb;
-reg         ibus_ack;
-wire        ibus_we;
-wire [29:0] ibus_adr;
-reg  [31:0] ibus_dat_miso;
-wire [31:0] ibus_dat_mosi;
-wire [3:0]  ibus_sel;
-wire [1:0]  ibus_bte;
-wire [2:0]  ibus_cti;
-
-// Data bus (Wishbone)
-wire        dbus_cyc;
-wire        dbus_stb;
-reg         dbus_ack;
-wire        dbus_we;
-wire [29:0] dbus_adr;
-reg  [31:0] dbus_dat_miso;
-wire [31:0] dbus_dat_mosi;
-wire [3:0]  dbus_sel;
-wire [1:0]  dbus_bte;
-wire [2:0]  dbus_cti;
-
-// Active-high reset for VexRiscv
+// Active-high reset for VexiiRiscv
 wire reset = ~reset_n;
 
-// Instantiate VexRiscv CPU
-VexRiscv cpu (
+// FetchL1Axi4 (I-cache, read-only): AR + R channels
+wire        fetch_ar_valid;
+reg         fetch_ar_ready;
+wire [31:0] fetch_ar_addr;
+wire [0:0]  fetch_ar_id;
+wire [7:0]  fetch_ar_len;
+
+reg         fetch_r_valid;
+wire        fetch_r_ready;
+reg  [31:0] fetch_r_data;
+reg  [0:0]  fetch_r_id;
+wire [1:0]  fetch_r_resp = 2'b00;
+reg         fetch_r_last;
+
+// LsuL1Axi4 (D-cache, full AXI4): AW + W + B + AR + R channels
+wire        lsu_aw_valid;
+reg         lsu_aw_ready;
+wire [31:0] lsu_aw_addr;
+wire [0:0]  lsu_aw_id;
+wire [7:0]  lsu_aw_len;
+
+wire        lsu_w_valid;
+reg         lsu_w_ready;
+wire [31:0] lsu_w_data;
+wire [3:0]  lsu_w_strb;
+wire        lsu_w_last;
+
+reg         lsu_b_valid;
+wire        lsu_b_ready;
+reg  [0:0]  lsu_b_id;
+wire [1:0]  lsu_b_resp = 2'b00;
+
+wire        lsu_ar_valid;
+reg         lsu_ar_ready;
+wire [31:0] lsu_ar_addr;
+wire [0:0]  lsu_ar_id;
+wire [7:0]  lsu_ar_len;
+
+reg         lsu_r_valid;
+wire        lsu_r_ready;
+reg  [31:0] lsu_r_data;
+reg  [0:0]  lsu_r_id;
+wire [1:0]  lsu_r_resp = 2'b00;
+reg         lsu_r_last;
+
+// LsuPlugin IO bus (simple cmd/rsp, uncached data)
+wire        io_cmd_valid;
+reg         io_cmd_ready;
+wire        io_cmd_write;
+wire [31:0] io_cmd_addr;
+wire [31:0] io_cmd_data;
+wire [3:0]  io_cmd_mask;
+
+reg         io_rsp_valid;
+reg         io_rsp_error;
+reg  [31:0] io_rsp_data;
+
+// 64-bit rdtime counter for PrivilegedPlugin
+reg [63:0] rdtime_counter;
+always @(posedge clk or posedge reset) begin
+    if (reset)
+        rdtime_counter <= 64'd0;
+    else
+        rdtime_counter <= rdtime_counter + 64'd1;
+end
+
+// ============================================
+// VexiiRiscv CPU instantiation
+// ============================================
+VexiiRiscv cpu (
     .clk(clk),
     .reset(reset),
 
-    // Reset vector - boot at 0x00000000
-    .externalResetVector(32'h00000000),
+    .PrivilegedPlugin_logic_rdtime(rdtime_counter),
+    .PrivilegedPlugin_logic_harts_0_int_m_timer(1'b0),
+    .PrivilegedPlugin_logic_harts_0_int_m_software(1'b0),
+    .PrivilegedPlugin_logic_harts_0_int_m_external(1'b0),
 
-    // Interrupts (tie off for now)
-    .timerInterrupt(1'b0),
-    .softwareInterrupt(1'b0),
-    .externalInterrupt(1'b0),
+    // LsuL1Axi4 (D-cache)
+    .LsuL1Axi4Plugin_logic_axi_aw_valid(lsu_aw_valid),
+    .LsuL1Axi4Plugin_logic_axi_aw_ready(lsu_aw_ready),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_addr(lsu_aw_addr),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_id(lsu_aw_id),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_len(lsu_aw_len),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_size(),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_burst(),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_cache(),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_prot(),
 
-    // Instruction Wishbone bus
-    .iBusWishbone_CYC(ibus_cyc),
-    .iBusWishbone_STB(ibus_stb),
-    .iBusWishbone_ACK(ibus_ack),
-    .iBusWishbone_WE(ibus_we),
-    .iBusWishbone_ADR(ibus_adr),
-    .iBusWishbone_DAT_MISO(ibus_dat_miso),
-    .iBusWishbone_DAT_MOSI(ibus_dat_mosi),
-    .iBusWishbone_SEL(ibus_sel),
-    .iBusWishbone_ERR(1'b0),
-    .iBusWishbone_BTE(ibus_bte),
-    .iBusWishbone_CTI(ibus_cti),
+    .LsuL1Axi4Plugin_logic_axi_w_valid(lsu_w_valid),
+    .LsuL1Axi4Plugin_logic_axi_w_ready(lsu_w_ready),
+    .LsuL1Axi4Plugin_logic_axi_w_payload_data(lsu_w_data),
+    .LsuL1Axi4Plugin_logic_axi_w_payload_strb(lsu_w_strb),
+    .LsuL1Axi4Plugin_logic_axi_w_payload_last(lsu_w_last),
 
-    // Data Wishbone bus
-    .dBusWishbone_CYC(dbus_cyc),
-    .dBusWishbone_STB(dbus_stb),
-    .dBusWishbone_ACK(dbus_ack),
-    .dBusWishbone_WE(dbus_we),
-    .dBusWishbone_ADR(dbus_adr),
-    .dBusWishbone_DAT_MISO(dbus_dat_miso),
-    .dBusWishbone_DAT_MOSI(dbus_dat_mosi),
-    .dBusWishbone_SEL(dbus_sel),
-    .dBusWishbone_ERR(1'b0),
-    .dBusWishbone_BTE(dbus_bte),
-    .dBusWishbone_CTI(dbus_cti)
+    .LsuL1Axi4Plugin_logic_axi_b_valid(lsu_b_valid),
+    .LsuL1Axi4Plugin_logic_axi_b_ready(lsu_b_ready),
+    .LsuL1Axi4Plugin_logic_axi_b_payload_id(lsu_b_id),
+    .LsuL1Axi4Plugin_logic_axi_b_payload_resp(lsu_b_resp),
+
+    .LsuL1Axi4Plugin_logic_axi_ar_valid(lsu_ar_valid),
+    .LsuL1Axi4Plugin_logic_axi_ar_ready(lsu_ar_ready),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_addr(lsu_ar_addr),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_id(lsu_ar_id),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_len(lsu_ar_len),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_size(),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_burst(),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_cache(),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_prot(),
+
+    .LsuL1Axi4Plugin_logic_axi_r_valid(lsu_r_valid),
+    .LsuL1Axi4Plugin_logic_axi_r_ready(lsu_r_ready),
+    .LsuL1Axi4Plugin_logic_axi_r_payload_data(lsu_r_data),
+    .LsuL1Axi4Plugin_logic_axi_r_payload_id(lsu_r_id),
+    .LsuL1Axi4Plugin_logic_axi_r_payload_resp(lsu_r_resp),
+    .LsuL1Axi4Plugin_logic_axi_r_payload_last(lsu_r_last),
+
+    // FetchL1Axi4 (I-cache, read-only)
+    .FetchL1Axi4Plugin_logic_axi_ar_valid(fetch_ar_valid),
+    .FetchL1Axi4Plugin_logic_axi_ar_ready(fetch_ar_ready),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_addr(fetch_ar_addr),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_id(fetch_ar_id),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_len(fetch_ar_len),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_size(),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_burst(),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_cache(),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_prot(),
+
+    .FetchL1Axi4Plugin_logic_axi_r_valid(fetch_r_valid),
+    .FetchL1Axi4Plugin_logic_axi_r_ready(fetch_r_ready),
+    .FetchL1Axi4Plugin_logic_axi_r_payload_data(fetch_r_data),
+    .FetchL1Axi4Plugin_logic_axi_r_payload_id(fetch_r_id),
+    .FetchL1Axi4Plugin_logic_axi_r_payload_resp(fetch_r_resp),
+    .FetchL1Axi4Plugin_logic_axi_r_payload_last(fetch_r_last),
+
+    // LsuPlugin IO bus (uncached data)
+    .LsuPlugin_logic_bus_cmd_valid(io_cmd_valid),
+    .LsuPlugin_logic_bus_cmd_ready(io_cmd_ready),
+    .LsuPlugin_logic_bus_cmd_payload_write(io_cmd_write),
+    .LsuPlugin_logic_bus_cmd_payload_address(io_cmd_addr),
+    .LsuPlugin_logic_bus_cmd_payload_data(io_cmd_data),
+    .LsuPlugin_logic_bus_cmd_payload_size(),
+    .LsuPlugin_logic_bus_cmd_payload_mask(io_cmd_mask),
+    .LsuPlugin_logic_bus_cmd_payload_io(),
+    .LsuPlugin_logic_bus_cmd_payload_fromHart(),
+    .LsuPlugin_logic_bus_cmd_payload_uopId(),
+    .LsuPlugin_logic_bus_rsp_valid(io_rsp_valid),
+    .LsuPlugin_logic_bus_rsp_payload_error(io_rsp_error),
+    .LsuPlugin_logic_bus_rsp_payload_data(io_rsp_data)
 );
 
 // ============================================
-// Arbitrated memory interface
+// Request arbitration
 // ============================================
-// Round-robin arbiter: prevents I-bus starvation during sustained D-bus
-// traffic (e.g. large memcpy causing continuous D-cache line fills).
-// Convert Wishbone to simple valid/ready protocol
+localparam BUS_NONE  = 2'd0;
+localparam BUS_FETCH = 2'd1;
+localparam BUS_LSU   = 2'd2;
+localparam BUS_IO    = 2'd3;
 
-wire live_ibus_req = ibus_cyc & ibus_stb & ~ibus_ack;
-wire live_dbus_req = dbus_cyc & dbus_stb & ~dbus_ack;
+reg last_grant_lsu;
 
-// Round-robin: track last grant, give priority to the other bus
-reg last_grant_dbus;
-wire live_dbus_grant = live_dbus_req & (~live_ibus_req | ~last_grant_dbus);
-wire live_ibus_grant = live_ibus_req & ~live_dbus_grant;
+wire fetch_req = fetch_ar_valid;
+wire lsu_rd_req = lsu_ar_valid;
+wire lsu_wr_req = lsu_aw_valid;
+wire lsu_req = lsu_rd_req | lsu_wr_req;
 
-// Muxed memory interface signals
-wire        live_mem_valid = live_dbus_grant | live_ibus_grant;
-wire [31:0] live_mem_addr  = live_dbus_grant ? {dbus_adr, 2'b00} : {ibus_adr, 2'b00};
-wire [31:0] live_mem_wdata = dbus_dat_mosi;
-wire [3:0]  live_mem_wstrb = live_dbus_grant ? (dbus_we ? dbus_sel : 4'b0) : 4'b0;
-wire        live_mem_write = live_dbus_grant & dbus_we;
-
-// Memory map:
-// 0x00000000 - 0x0000FFFF : RAM (64KB)
-// 0x08000000 - 0x0800FFFF : BRAM Framebuffer (2x 160x120 RGB332 double-buffered)
-// 0x10000000 - 0x13FFFFFF : SDRAM (64MB) - includes framebuffers
-//   Framebuffer 0: 0x10000000 - 0x10025800 (153,600 bytes)
-//   Framebuffer 1: 0x10100000 - 0x10125800 (153,600 bytes)
-// 0x50000000 - 0x53FFFFFF : SDRAM uncached alias (64MB, same physical SDRAM window)
-// 0x20000000 - 0x20001FFF : Terminal VRAM
-// 0x30000000 - 0x30FFFFFF : PSRAM0 (16MB) - cram0
-// 0x31000000 - 0x31FFFFFF : PSRAM1 (16MB) - cram1
-// 0x40000000 - 0x400000FF : System registers
-// 0x4D000000 - 0x4DFFFFFF : Link MMIO peripheral
-// Pre-decode address regions from each bus independently.
-// This runs address decode in PARALLEL with grant arbitration, removing
-// the 32-bit address mux + comparator chain from the critical path.
-// After the grant decision, only a 1-bit mux is needed per region.
-wire [31:0] dbus_byte_addr = {dbus_adr, 2'b00};
-wire [31:0] ibus_byte_addr = {ibus_adr, 2'b00};
-
-// D-bus pre-decode
-wire dbus_ram_select       = (dbus_byte_addr[31:16] == 16'b0);
-wire dbus_fbbram_select    = (dbus_byte_addr[31:16] == 16'h0800);  // 0x08000000-0x0800FFFF (BRAM FB)
-wire dbus_sdram_select     = (dbus_byte_addr[31:26] == 6'b000100);
-wire dbus_sdram_uc_select  = (dbus_byte_addr[31:26] == 6'b010100);
-wire dbus_term_select      = (dbus_byte_addr[31:13] == 19'h10000);
-wire dbus_psram_select     = (dbus_byte_addr[31:24] == 8'h30);  // 0x30 only (16MB, CRAM0)
-wire dbus_psram1_select    = (dbus_byte_addr[31:24] == 8'h31);  // 0x31 only (16MB, CRAM1)
-wire dbus_sysreg_select    = (dbus_byte_addr[31:8]  == 24'h400000);
-wire dbus_link_select      = (dbus_byte_addr[31:24] == 8'h4D);
-wire dbus_audio_select     = (dbus_byte_addr[31:24] == 8'h4C);
-
-// I-bus pre-decode
-wire ibus_ram_select       = (ibus_byte_addr[31:16] == 16'b0);
-wire ibus_fbbram_select    = (ibus_byte_addr[31:16] == 16'h0800);  // 0x08000000-0x0800FFFF (BRAM FB)
-wire ibus_sdram_select     = (ibus_byte_addr[31:26] == 6'b000100);
-wire ibus_sdram_uc_select  = (ibus_byte_addr[31:26] == 6'b010100);
-wire ibus_term_select      = (ibus_byte_addr[31:13] == 19'h10000);
-wire ibus_psram_select     = (ibus_byte_addr[31:24] == 8'h30);  // 0x30 only (16MB, CRAM0)
-wire ibus_psram1_select    = (ibus_byte_addr[31:24] == 8'h31);  // 0x31 only (16MB, CRAM1)
-wire ibus_sysreg_select    = (ibus_byte_addr[31:8]  == 24'h400000);
-wire ibus_link_select      = (ibus_byte_addr[31:24] == 8'h4D);
-wire ibus_audio_select     = (ibus_byte_addr[31:24] == 8'h4C);
-
-// Mux decoded results based on grant (1-bit mux vs 32-bit address mux + decode)
-wire live_ram_select       = live_dbus_grant ? dbus_ram_select       : ibus_ram_select;       // 0x00000000-0x0000FFFF (64KB)
-wire live_fbbram_select    = live_dbus_grant ? dbus_fbbram_select    : ibus_fbbram_select;    // 0x08000000-0x0800FFFF (BRAM FB)
-wire live_sdram_select     = live_dbus_grant ? dbus_sdram_select     : ibus_sdram_select;     // 0x10000000-0x13FFFFFF (64MB)
-wire live_sdram_uc_select  = live_dbus_grant ? dbus_sdram_uc_select  : ibus_sdram_uc_select;  // 0x50000000-0x53FFFFFF (64MB uncached alias)
-wire live_term_select      = live_dbus_grant ? dbus_term_select      : ibus_term_select;      // 0x20000000-0x20001FFF
-wire live_psram_select     = live_dbus_grant ? dbus_psram_select     : ibus_psram_select;     // 0x30000000-0x30FFFFFF (16MB)
-wire live_psram1_select    = live_dbus_grant ? dbus_psram1_select    : ibus_psram1_select;    // 0x31000000-0x31FFFFFF (16MB)
-wire live_sysreg_select    = live_dbus_grant ? dbus_sysreg_select    : ibus_sysreg_select;    // 0x40000000-0x400000FF
-wire live_link_select      = live_dbus_grant ? dbus_link_select      : ibus_link_select;      // 0x4D000000-0x4DFFFFFF
-wire live_audio_select     = live_dbus_grant ? dbus_audio_select     : ibus_audio_select;     // 0x4C000000-0x4CFFFFFF (audio output)
-wire accept_access         = !mem_pending && live_mem_valid;
+// Priority: LSU > Fetch with round-robin, IO lowest
+wire lsu_grant = lsu_req & (~fetch_req | ~last_grant_lsu);
+wire fetch_grant = fetch_req & ~lsu_grant;
+wire lsu_rd_grant = lsu_grant & lsu_rd_req;
+wire lsu_wr_grant = lsu_grant & ~lsu_rd_req;
+wire io_grant = io_cmd_valid & ~lsu_grant & ~fetch_grant;
 
 // ============================================
-// RAM using block RAM (64KB = 16384 x 32-bit words)
+// Memory access FSM
 // ============================================
-wire [31:0] ram_rdata;
-wire [13:0] ram_addr_mux;
-wire ram_wren;
+localparam FSM_IDLE       = 3'd0;
+localparam FSM_MEM_AR     = 3'd1;
+localparam FSM_MEM_R      = 3'd2;
+localparam FSM_MEM_AW     = 3'd3;
+localparam FSM_MEM_W      = 3'd4;
+localparam FSM_MEM_B      = 3'd5;
+localparam FSM_WRITE_NEXT = 3'd6;
 
-altsyncram #(
-    .operation_mode("SINGLE_PORT"),
-    .width_a(32),
-    .widthad_a(14),              // 14 bits = 16384 words = 64KB
-    .numwords_a(16384),
-    .width_byteena_a(4),
-    .lpm_type("altsyncram"),
-    .outdata_reg_a("UNREGISTERED"),
-    .init_file("core/firmware.mif"),
-    .intended_device_family("Cyclone V"),
-    .read_during_write_mode_port_a("NEW_DATA_NO_NBE_READ")
-) ram (
-    .clock0(clk),
-    .address_a(ram_addr_mux),
-    .data_a(mem_pending ? req_wdata : live_mem_wdata),
-    .wren_a(ram_wren),
-    .byteena_a(mem_pending ? req_wstrb : live_mem_wstrb),
-    .q_a(ram_rdata),
-    // Unused ports
-    .aclr0(1'b0),
-    .aclr1(1'b0),
-    .address_b(1'b0),
-    .addressstall_a(1'b0),
-    .addressstall_b(1'b0),
-    .byteena_b(1'b1),
-    .clock1(1'b1),
-    .clocken0(1'b1),
-    .clocken1(1'b1),
-    .clocken2(1'b1),
-    .clocken3(1'b1),
-    .data_b({32{1'b0}}),
-    .eccstatus(),
-    .q_b(),
-    .rden_a(1'b1),
-    .rden_b(1'b0),
-    .wren_b(1'b0)
-);
+reg [2:0] fsm_state;
 
-// ============================================
-// BRAM Framebuffer: 2 x 160x120 = 38,400 bytes = 9,600 x 32-bit words
-// Port A: CPU read/write with byte enables (clk domain)
-// Port B: Video scanout read-only (clk_video domain)
-// Uses explicit altsyncram to guarantee M10K inference with byte enables.
-// ============================================
-// Double-buffer select: 0 or 1
-reg fb_draw_buf_sel;
-reg fb_display_buf_sel;
-assign fb_display_buf_sel_out = fb_display_buf_sel;
+// Latched request fields
+reg [31:0] req_addr_r;
+reg [31:0] req_wdata_r;
+reg [3:0]  req_wstrb_r;
+reg [0:0]  req_id_r;       // AXI ID echo-back (refill-count=2)
+reg [1:0]  active_bus;
+reg        is_write_r;
 
-// CPU write port address: {buf_sel, word_addr_within_buffer[11:0]}
-// Each buffer = 19,200 bytes = 4,800 words (needs 13 bits: 1 buf + 12 addr)
-wire [12:0] fb_bram_wr_addr = {fb_draw_buf_sel, live_mem_addr[13:2]};
-wire        fb_bram_wren = accept_access && live_fbbram_select && |live_mem_wstrb;
-wire [3:0]  fb_bram_byteena = live_mem_wstrb;
+// Burst tracking
+reg [7:0]  burst_len_r;
+reg [7:0]  burst_count;
 
-// BRAM read data for CPU reads
-wire [31:0] fb_bram_cpu_rdata;
-reg fbbram_pending;
+// Memory target for AXI4 forwarding (3-way)
+localparam TGT_SDRAM = 2'd0;
+localparam TGT_PSRAM = 2'd1;
+localparam TGT_LOCAL = 2'd2;
+reg [1:0] target_mem;
 
-// Port A address mux: use pending address during completion cycle
-wire [12:0] fb_bram_addr_a = mem_pending ? {fb_draw_buf_sel, req_addr[13:2]} : fb_bram_wr_addr;
+// Whether this beat is the last of a burst
+wire beat_is_last = (burst_count == burst_len_r);
 
-altsyncram #(
-    .operation_mode("BIDIR_DUAL_PORT"),
-    .width_a(32),
-    .widthad_a(14),              // 14 bits = 16384 max words (we use 9600)
-    .numwords_a(16384),
-    .width_byteena_a(4),        // 4 byte enables for 32-bit word
-    .width_b(32),
-    .widthad_b(14),
-    .numwords_b(16384),
-    .width_byteena_b(1),
-    .lpm_type("altsyncram"),
-    .outdata_reg_a("UNREGISTERED"),
-    .outdata_reg_b("UNREGISTERED"),
-    .intended_device_family("Cyclone V"),
-    .read_during_write_mode_port_a("NEW_DATA_NO_NBE_READ"),
-    .read_during_write_mode_mixed_ports("DONT_CARE"),
-    .power_up_uninitialized("TRUE")
-) fb_bram (
-    .clock0(clk),                       // Port A clock (CPU)
-    .address_a({1'b0, fb_bram_addr_a}),
-    .data_a(mem_pending ? req_wdata : live_mem_wdata),
-    .wren_a(fb_bram_wren),
-    .byteena_a(fb_bram_byteena),
-    .q_a(fb_bram_cpu_rdata),
-
-    .clock1(clk_video),                 // Port B clock (video 12.288 MHz)
-    .address_b({1'b0, fb_bram_rd_addr}),
-    .data_b({32{1'b0}}),
-    .wren_b(1'b0),
-    .byteena_b(1'b1),
-    .q_b(fb_bram_rd_data),
-
-    // Unused
-    .aclr0(1'b0),
-    .aclr1(1'b0),
-    .addressstall_a(1'b0),
-    .addressstall_b(1'b0),
-    .clocken0(1'b1),
-    .clocken1(1'b1),
-    .clocken2(1'b1),
-    .clocken3(1'b1),
-    .eccstatus(),
-    .rden_a(1'b1),
-    .rden_b(1'b1)
-);
+// AXI4 master target mux (3-way)
+wire mem_arready = (target_mem == TGT_SDRAM) ? m_sdram_arready :
+                   (target_mem == TGT_PSRAM) ? m_psram_arready :
+                                               m_local_arready;
+wire mem_rvalid  = (target_mem == TGT_SDRAM) ? m_sdram_rvalid :
+                   (target_mem == TGT_PSRAM) ? m_psram_rvalid :
+                                               m_local_rvalid;
+wire [31:0] mem_rdata = (target_mem == TGT_SDRAM) ? m_sdram_rdata :
+                        (target_mem == TGT_PSRAM) ? m_psram_rdata :
+                                                    m_local_rdata;
+wire mem_rlast   = (target_mem == TGT_SDRAM) ? m_sdram_rlast :
+                   (target_mem == TGT_PSRAM) ? m_psram_rlast :
+                                               m_local_rlast;
+wire mem_awready = (target_mem == TGT_SDRAM) ? m_sdram_awready :
+                   (target_mem == TGT_PSRAM) ? m_psram_awready :
+                                               m_local_awready;
+wire mem_wready  = (target_mem == TGT_SDRAM) ? m_sdram_wready :
+                   (target_mem == TGT_PSRAM) ? m_psram_wready :
+                                               m_local_wready;
+wire mem_bvalid  = (target_mem == TGT_SDRAM) ? m_sdram_bvalid :
+                   (target_mem == TGT_PSRAM) ? m_psram_bvalid :
+                                               m_local_bvalid;
 
 // ============================================
-// Forward terminal requests to terminal module
-assign term_mem_valid = mem_pending ? term_pending : (live_mem_valid && live_term_select);
-assign term_mem_addr = mem_pending ? req_addr : live_mem_addr;
-assign term_mem_wdata = mem_pending ? req_wdata : live_mem_wdata;
-assign term_mem_wstrb = mem_pending ? req_wstrb : live_mem_wstrb;
-
+// Main FSM
 // ============================================
-// System registers
-// ============================================
-// 0x00: SYS_STATUS       - Bit 0: always 1 (SDRAM ready), Bit 1: dataslot_allcomplete
-// 0x04: SYS_CYCLE_LO     - Cycle counter low
-// 0x08: SYS_CYCLE_HI     - Cycle counter high
-// 0x0C: SYS_DISPLAY_MODE - 0=terminal overlay, 1=framebuffer only
-// 0x10: SYS_FB_DISPLAY   - Display framebuffer SDRAM address (read-only)
-// 0x14: SYS_FB_DRAW      - Draw framebuffer SDRAM address (read-only)
-// 0x18: SYS_FB_SWAP      - Write 1 to swap buffers (on next vsync)
-// 0x40: SYS_PAL_INDEX    - Palette write index (0-255)
-// 0x44: SYS_PAL_DATA     - Write RGB888, triggers palette write, auto-increments index
-// 0x50: SYS_CONT1_KEY    - Controller 1 key bitmap (read-only)
-// 0x54: SYS_CONT1_JOY    - Controller 1 joystick axes (read-only)
-// 0x58: SYS_CONT1_TRIG   - Controller 1 triggers in bits [15:0] (read-only)
-// 0x5C: SYS_CONT2_KEY    - Controller 2 key bitmap (read-only)
-// 0x60: SYS_CONT2_JOY    - Controller 2 joystick axes (read-only)
-// 0x64: SYS_CONT2_TRIG   - Controller 2 triggers in bits [15:0] (read-only)
-//
-// Target dataslot registers (0x20-0x3C):
-// 0x20: DS_SLOT_ID       - Data slot ID (16-bit)
-// 0x24: DS_SLOT_OFFSET   - Slot offset for read/write
-// 0x28: DS_BRIDGE_ADDR   - Bridge address (destination for read, source for write)
-// 0x2C: DS_LENGTH        - Transfer length in bytes
-// 0x30: DS_PARAM_ADDR    - Address of parameter struct (for openfile)
-// 0x34: DS_RESP_ADDR     - Address of response struct
-// 0x38: DS_COMMAND       - Write to trigger: 1=read, 2=write, 3=openfile
-// 0x3C: DS_STATUS        - Status: bit0=ack, bit1=done, bits[4:2]=err
-
-reg [31:0] sysreg_rdata;
-reg [63:0] cycle_counter;
-reg display_mode_reg;  // 0=terminal overlay, 1=framebuffer only
-
-// Target dataslot registers
-reg [15:0] ds_slot_id_reg;
-reg [31:0] ds_slot_offset_reg;
-reg [31:0] ds_bridge_addr_reg;
-reg [31:0] ds_length_reg;
-reg [31:0] ds_param_addr_reg;
-reg [31:0] ds_resp_addr_reg;
-
-// Palette write index register
-reg [7:0] pal_index_reg;
-
-// Double buffer addresses (legacy, kept for sysreg read compatibility)
-localparam FB_ADDR_0 = 25'h0000000;
-localparam FB_ADDR_1 = 25'h0080000;
-reg [24:0] fb_display_addr_reg;
-reg [24:0] fb_draw_addr_reg;
-reg fb_swap_pending;                  // Swap requested, waiting for vsync
-
-assign display_mode = display_mode_reg;
-assign fb_display_addr = fb_display_addr_reg;
-
-// Synchronize dataslot_allcomplete from bridge clock domain (clk_74a) to CPU clock domain
-reg [2:0] dataslot_allcomplete_sync;
-always @(posedge clk) begin
-    dataslot_allcomplete_sync <= {dataslot_allcomplete_sync[1:0], dataslot_allcomplete};
-end
-wire dataslot_allcomplete_s = dataslot_allcomplete_sync[2];
-
-// Synchronize vsync to CPU clock domain
-reg [2:0] vsync_sync;
-always @(posedge clk) begin
-    vsync_sync <= {vsync_sync[1:0], vsync};
-end
-wire vsync_rising = vsync_sync[1] && !vsync_sync[2];
-
-// Synchronize target_dataslot_ack and target_dataslot_done from bridge clock domain
-reg [2:0] target_ack_sync;
-reg [2:0] target_done_sync;
-reg [2:0] target_err_sync [2:0];
 always @(posedge clk or posedge reset) begin
     if (reset) begin
-        target_ack_sync <= 3'b0;
-        target_done_sync <= 3'b0;
-        target_err_sync[0] <= 3'b0;
-        target_err_sync[1] <= 3'b0;
-        target_err_sync[2] <= 3'b0;
+        fsm_state <= FSM_IDLE;
+        active_bus <= BUS_NONE;
+        is_write_r <= 0;
+        req_addr_r <= 0;
+        req_wdata_r <= 0;
+        req_wstrb_r <= 0;
+        req_id_r <= 0;
+        burst_len_r <= 0;
+        burst_count <= 0;
+        last_grant_lsu <= 0;
+
+        target_mem <= TGT_SDRAM;
+
+        fetch_ar_ready <= 0;
+        fetch_r_valid <= 0;
+        fetch_r_data <= 0;
+        fetch_r_id <= 0;
+        fetch_r_last <= 0;
+
+        lsu_aw_ready <= 0;
+        lsu_w_ready <= 0;
+        lsu_ar_ready <= 0;
+        lsu_r_valid <= 0;
+        lsu_r_data <= 0;
+        lsu_r_id <= 0;
+        lsu_r_last <= 0;
+        lsu_b_valid <= 0;
+        lsu_b_id <= 0;
+
+        io_cmd_ready <= 0;
+        io_rsp_valid <= 0;
+        io_rsp_error <= 0;
+        io_rsp_data <= 0;
+
+        m_sdram_arvalid <= 0;
+        m_sdram_araddr <= 0;
+        m_sdram_arlen <= 0;
+        m_sdram_awvalid <= 0;
+        m_sdram_awaddr <= 0;
+        m_sdram_awlen <= 0;
+        m_sdram_wvalid <= 0;
+        m_sdram_wdata <= 0;
+        m_sdram_wstrb <= 0;
+        m_sdram_wlast <= 0;
+
+        m_psram_arvalid <= 0;
+        m_psram_araddr <= 0;
+        m_psram_arlen <= 0;
+        m_psram_awvalid <= 0;
+        m_psram_awaddr <= 0;
+        m_psram_awlen <= 0;
+        m_psram_wvalid <= 0;
+        m_psram_wdata <= 0;
+        m_psram_wstrb <= 0;
+        m_psram_wlast <= 0;
+
+        m_local_arvalid <= 0;
+        m_local_araddr <= 0;
+        m_local_arlen <= 0;
+        m_local_awvalid <= 0;
+        m_local_awaddr <= 0;
+        m_local_awlen <= 0;
+        m_local_wvalid <= 0;
+        m_local_wdata <= 0;
+        m_local_wstrb <= 0;
+        m_local_wlast <= 0;
     end else begin
-        target_ack_sync <= {target_ack_sync[1:0], target_dataslot_ack};
-        target_done_sync <= {target_done_sync[1:0], target_dataslot_done};
-        target_err_sync[0] <= {target_err_sync[0][1:0], target_dataslot_err[0]};
-        target_err_sync[1] <= {target_err_sync[1][1:0], target_dataslot_err[1]};
-        target_err_sync[2] <= {target_err_sync[2][1:0], target_dataslot_err[2]};
-    end
-end
-wire target_ack_s = target_ack_sync[2];
-wire target_done_s = target_done_sync[2];
-wire [2:0] target_err_s = {target_err_sync[2][2], target_err_sync[1][2], target_err_sync[0][2]};
+        // Defaults: deassert single-cycle pulses
+        fetch_ar_ready <= 0;
+        fetch_r_valid <= 0;
+        lsu_aw_ready <= 0;
+        lsu_w_ready <= 0;
+        lsu_ar_ready <= 0;
+        lsu_r_valid <= 0;
+        lsu_b_valid <= 0;
+        io_cmd_ready <= 0;
+        io_rsp_valid <= 0;
 
-// Synchronize controller state from APF clock domain into CPU clock domain.
-wire [31:0] cont1_key_s;
-wire [31:0] cont1_joy_s;
-wire [15:0] cont1_trig_s;
-wire [31:0] cont2_key_s;
-wire [31:0] cont2_joy_s;
-wire [15:0] cont2_trig_s;
-synch_3 #(.WIDTH(32)) s_cont1_key(
-    .i(cont1_key),
-    .o(cont1_key_s),
-    .clk(clk),
-    .rise(),
-    .fall()
-);
-synch_3 #(.WIDTH(32)) s_cont2_key(
-    .i(cont2_key),
-    .o(cont2_key_s),
-    .clk(clk),
-    .rise(),
-    .fall()
-);
-synch_3 #(.WIDTH(32)) s_cont2_joy(
-    .i(cont2_joy),
-    .o(cont2_joy_s),
-    .clk(clk),
-    .rise(),
-    .fall()
-);
-synch_3 #(.WIDTH(16)) s_cont2_trig(
-    .i(cont2_trig),
-    .o(cont2_trig_s),
-    .clk(clk),
-    .rise(),
-    .fall()
-);
-synch_3 #(.WIDTH(32)) s_cont1_joy(
-    .i(cont1_joy),
-    .o(cont1_joy_s),
-    .clk(clk),
-    .rise(),
-    .fall()
-);
-synch_3 #(.WIDTH(16)) s_cont1_trig(
-    .i(cont1_trig),
-    .o(cont1_trig_s),
-    .clk(clk),
-    .rise(),
-    .fall()
-);
+        case (fsm_state)
 
-always @(posedge clk) begin
-    if (reset) begin
-        cycle_counter <= 0;
-        display_mode_reg <= 0;  // Start in terminal overlay mode
-        fb_display_addr_reg <= FB_ADDR_0;
-        fb_draw_addr_reg <= FB_ADDR_1;
-        fb_swap_pending <= 0;
-        fb_draw_buf_sel <= 1;      // Draw to buffer 1
-        fb_display_buf_sel <= 0;   // Display buffer 0
-        pal_wr <= 0;
-        pal_addr <= 0;
-        pal_data <= 0;
-        pal_index_reg <= 0;
-        ds_slot_id_reg <= 0;
-        ds_slot_offset_reg <= 0;
-        ds_bridge_addr_reg <= 0;
-        ds_length_reg <= 0;
-        ds_param_addr_reg <= 0;
-        ds_resp_addr_reg <= 0;
-        target_dataslot_read <= 0;
-        target_dataslot_write <= 0;
-        target_dataslot_openfile <= 0;
-        target_dataslot_id <= 0;
-        target_dataslot_slotoffset <= 0;
-        target_dataslot_bridgeaddr <= 0;
-        target_dataslot_length <= 0;
-        target_buffer_param_struct <= 0;
-        target_buffer_resp_struct <= 0;
-    end else begin
-        cycle_counter <= cycle_counter + 1;
+        // ============================================
+        // IDLE: Accept new AXI4 request, decode target
+        // ============================================
+        FSM_IDLE: begin
+            // Deassert AXI4 master valids
+            m_sdram_arvalid <= 0;
+            m_sdram_awvalid <= 0;
+            m_sdram_wvalid <= 0;
+            m_psram_arvalid <= 0;
+            m_psram_awvalid <= 0;
+            m_psram_wvalid <= 0;
+            m_local_arvalid <= 0;
+            m_local_awvalid <= 0;
+            m_local_wvalid <= 0;
 
-        pal_wr <= 0;
+            if (lsu_rd_grant) begin
+                // Accept LsuL1 read (AR channel)
+                lsu_ar_ready <= 1;
+                active_bus <= BUS_LSU;
+                is_write_r <= 0;
+                req_addr_r <= lsu_ar_addr;
+                req_id_r <= lsu_ar_id;
+                burst_len_r <= lsu_ar_len;
+                burst_count <= 0;
+                last_grant_lsu <= 1;
 
-        // Keep command request asserted until bridge ACK is observed.
-        // A 1-cycle pulse can be missed crossing to clk_74a; level-hold avoids that.
-        if (target_ack_s) begin
-            target_dataslot_read <= 0;
-            target_dataslot_write <= 0;
-            target_dataslot_openfile <= 0;
-        end
+                // Issue AR to target slave
+                fsm_state <= FSM_MEM_AR;
+                if (lsu_ar_addr[31:26] == 6'b000100 || lsu_ar_addr[31:26] == 6'b010100) begin
+                    target_mem <= TGT_SDRAM;
+                    m_sdram_arvalid <= 1;
+                    m_sdram_araddr <= lsu_ar_addr;
+                    m_sdram_arlen <= lsu_ar_len;
+                end else if (lsu_ar_addr[31:27] == 5'b00110) begin
+                    target_mem <= TGT_PSRAM;
+                    m_psram_arvalid <= 1;
+                    m_psram_araddr <= lsu_ar_addr;
+                    m_psram_arlen <= lsu_ar_len;
+                end else begin
+                    target_mem <= TGT_LOCAL;
+                    m_local_arvalid <= 1;
+                    m_local_araddr <= lsu_ar_addr;
+                    m_local_arlen <= lsu_ar_len;
+                end
 
-        // Perform buffer swap on vsync if pending
-        if (fb_swap_pending && vsync_rising) begin
-            // Swap display and draw addresses (legacy)
-            fb_display_addr_reg <= fb_draw_addr_reg;
-            fb_draw_addr_reg <= fb_display_addr_reg;
-            // Swap BRAM framebuffer bank select
-            fb_draw_buf_sel <= fb_display_buf_sel;
-            fb_display_buf_sel <= fb_draw_buf_sel;
-            fb_swap_pending <= 0;
-        end
+            end else if (lsu_wr_grant) begin
+                // Accept LsuL1 write address (AW channel)
+                lsu_aw_ready <= 1;
+                active_bus <= BUS_LSU;
+                is_write_r <= 1;
+                req_addr_r <= lsu_aw_addr;
+                req_id_r <= lsu_aw_id;
+                burst_len_r <= lsu_aw_len;
+                burst_count <= 0;
+                last_grant_lsu <= 1;
 
-        // Write to display mode register (0x4000000C)
-        if (accept_access && live_sysreg_select && |live_mem_wstrb && live_mem_addr[7:2] == 6'b000011) begin
-            display_mode_reg <= live_mem_wdata[0];
-        end
+                // Determine target
+                if (lsu_aw_addr[31:26] == 6'b000100 || lsu_aw_addr[31:26] == 6'b010100)
+                    target_mem <= TGT_SDRAM;
+                else if (lsu_aw_addr[31:27] == 5'b00110)
+                    target_mem <= TGT_PSRAM;
+                else
+                    target_mem <= TGT_LOCAL;
 
-        // Write to swap register (0x40000018) - request buffer swap
-        if (accept_access && live_sysreg_select && |live_mem_wstrb && live_mem_addr[7:2] == 6'b000110) begin
-            if (live_mem_wdata[0])
-                fb_swap_pending <= 1;
-        end
+                // Also accept W if valid on same cycle
+                if (lsu_w_valid) begin
+                    lsu_w_ready <= 1;
+                    req_wdata_r <= lsu_w_data;
+                    req_wstrb_r <= lsu_w_strb;
 
-        // Target dataslot register writes
-        // 0x20: DS_SLOT_ID
-        if (accept_access && live_sysreg_select && |live_mem_wstrb && live_mem_addr[7:2] == 6'b001000) begin
-            ds_slot_id_reg <= live_mem_wdata[15:0];
-        end
-        // 0x24: DS_SLOT_OFFSET
-        if (accept_access && live_sysreg_select && |live_mem_wstrb && live_mem_addr[7:2] == 6'b001001) begin
-            ds_slot_offset_reg <= live_mem_wdata;
-        end
-        // 0x28: DS_BRIDGE_ADDR
-        if (accept_access && live_sysreg_select && |live_mem_wstrb && live_mem_addr[7:2] == 6'b001010) begin
-            ds_bridge_addr_reg <= live_mem_wdata;
-        end
-        // 0x2C: DS_LENGTH
-        if (accept_access && live_sysreg_select && |live_mem_wstrb && live_mem_addr[7:2] == 6'b001011) begin
-            ds_length_reg <= live_mem_wdata;
-        end
-        // 0x30: DS_PARAM_ADDR
-        if (accept_access && live_sysreg_select && |live_mem_wstrb && live_mem_addr[7:2] == 6'b001100) begin
-            ds_param_addr_reg <= live_mem_wdata;
-        end
-        // 0x34: DS_RESP_ADDR
-        if (accept_access && live_sysreg_select && |live_mem_wstrb && live_mem_addr[7:2] == 6'b001101) begin
-            ds_resp_addr_reg <= live_mem_wdata;
-        end
-        // 0x40: PAL_INDEX
-        if (accept_access && live_sysreg_select && |live_mem_wstrb && live_mem_addr[7:2] == 6'b010000) begin
-            pal_index_reg <= live_mem_wdata[7:0];
-        end
-        // 0x44: PAL_DATA - write palette entry and auto-increment
-        if (accept_access && live_sysreg_select && |live_mem_wstrb && live_mem_addr[7:2] == 6'b010001) begin
-            pal_wr <= 1;
-            pal_addr <= pal_index_reg;
-            pal_data <= live_mem_wdata[23:0];
-            pal_index_reg <= pal_index_reg + 1;
-        end
-
-        // 0x38: DS_COMMAND - triggers the operation
-        if (accept_access && live_sysreg_select && |live_mem_wstrb && live_mem_addr[7:2] == 6'b001110) begin
-            // Only accept a new command when no command is currently in flight.
-            if (!(target_dataslot_read || target_dataslot_write || target_dataslot_openfile || target_ack_s)) begin
-                // Set up the target dataslot interface
-                target_dataslot_id <= ds_slot_id_reg;
-                target_dataslot_slotoffset <= ds_slot_offset_reg;
-                target_dataslot_bridgeaddr <= ds_bridge_addr_reg;
-                target_dataslot_length <= ds_length_reg;
-                target_buffer_param_struct <= ds_param_addr_reg;
-                target_buffer_resp_struct <= ds_resp_addr_reg;
-
-                // Drive only one command line high.
-                target_dataslot_read <= 0;
-                target_dataslot_write <= 0;
-                target_dataslot_openfile <= 0;
-                case (live_mem_wdata[1:0])
-                    2'b01: target_dataslot_read <= 1;      // Read from slot
-                    2'b10: target_dataslot_write <= 1;     // Write to slot
-                    2'b11: target_dataslot_openfile <= 1;  // Open file into slot
-                endcase
-            end
-        end
-    end
-end
-
-wire [5:0] sysreg_addr = mem_pending ? req_addr[7:2] : live_mem_addr[7:2];
-
-always @(*) begin
-    case (sysreg_addr)
-        6'b000000: sysreg_rdata = {30'b0, dataslot_allcomplete_s, 1'b1};  // SYS_STATUS
-        6'b000001: sysreg_rdata = cycle_counter[31:0];   // SYS_CYCLE_LO
-        6'b000010: sysreg_rdata = cycle_counter[63:32];  // SYS_CYCLE_HI
-        6'b000011: sysreg_rdata = {31'b0, display_mode_reg};  // SYS_DISPLAY_MODE
-        6'b000100: sysreg_rdata = {7'b0, fb_display_addr_reg};  // SYS_FB_DISPLAY
-        6'b000101: sysreg_rdata = {7'b0, fb_draw_addr_reg};     // SYS_FB_DRAW
-        6'b000110: sysreg_rdata = {31'b0, fb_swap_pending};     // SYS_FB_SWAP
-        // Target dataslot registers
-        6'b001000: sysreg_rdata = {16'b0, ds_slot_id_reg};      // DS_SLOT_ID
-        6'b001001: sysreg_rdata = ds_slot_offset_reg;           // DS_SLOT_OFFSET
-        6'b001010: sysreg_rdata = ds_bridge_addr_reg;           // DS_BRIDGE_ADDR
-        6'b001011: sysreg_rdata = ds_length_reg;                // DS_LENGTH
-        6'b001100: sysreg_rdata = ds_param_addr_reg;            // DS_PARAM_ADDR
-        6'b001101: sysreg_rdata = ds_resp_addr_reg;             // DS_RESP_ADDR
-        6'b001110: sysreg_rdata = 32'h0;                        // DS_COMMAND (write-only)
-        6'b001111: sysreg_rdata = {27'b0, target_err_s, target_done_s, target_ack_s};  // DS_STATUS
-        6'b010000: sysreg_rdata = {24'b0, pal_index_reg};   // PAL_INDEX
-        6'b010001: sysreg_rdata = 32'h0;                     // PAL_DATA (write-only)
-        6'b010100: sysreg_rdata = cont1_key_s;               // SYS_CONT1_KEY
-        6'b010101: sysreg_rdata = cont1_joy_s;               // SYS_CONT1_JOY
-        6'b010110: sysreg_rdata = {16'b0, cont1_trig_s};     // SYS_CONT1_TRIG
-        6'b010111: sysreg_rdata = cont2_key_s;               // SYS_CONT2_KEY
-        6'b011000: sysreg_rdata = cont2_joy_s;               // SYS_CONT2_JOY
-        6'b011001: sysreg_rdata = {16'b0, cont2_trig_s};     // SYS_CONT2_TRIG
-        default: sysreg_rdata = 32'h0;
-    endcase
-end
-
-// ============================================
-// Memory access state machine
-// ============================================
-// Handle RAM, SDRAM, terminal, and sysreg accesses
-// Generate Wishbone ACK when complete
-
-reg mem_pending;
-reg [1:0] pending_bus;  // 0=none, 1=ibus, 2=dbus
-reg [31:0] req_addr;
-reg [31:0] req_wdata;
-reg [3:0] req_wstrb;
-reg ram_pending;
-reg term_pending;
-reg sdram_read_pending;
-reg sdram_write_pending;
-reg sdram_read_started;
-reg sdram_write_started;
-reg sdram_cmd_issued;
-reg psram_read_pending;
-reg psram_write_pending;
-reg psram_read_started;
-reg psram_write_started;
-reg psram_cmd_issued;
-reg psram_which;           // 0=CRAM0, 1=CRAM1
-reg [7:0] sdram_issue_wait;
-reg [7:0] psram_issue_wait;
-
-// Muxed PSRAM status/data based on which chip is active
-wire active_psram_busy        = psram_which ? psram1_busy        : psram_busy;
-wire active_psram_rdata_valid = psram_which ? psram1_rdata_valid : psram_rdata_valid;
-wire [31:0] active_psram_rdata = psram_which ? psram1_rdata      : psram_rdata;
-reg sysreg_pending;
-reg audio_pending;
-reg link_pending;
-// fbbram_pending declared above with BRAM FB
-reg [31:0] pending_rdata;
-reg sdram_read_is_prefetch;
-reg sdram_prefetch_primary_done;
-reg [20:0] sdram_prefetch_line_tag;
-reg [2:0] sdram_prefetch_req_idx;
-reg [2:0] sdram_prefetch_fill_idx;
-reg [3:0] sdram_prefetch_fill_count;
-reg sdram_prefetch_valid;
-reg [31:0] sdram_prefetch_data [0:7];
-reg [31:0] prefetch_hit_rdata;
-
-localparam BUS_NONE = 2'd0;
-localparam BUS_IBUS = 2'd1;
-localparam BUS_DBUS = 2'd2;
-localparam [2:0] SDRAM_PREFETCH_BURST_LEN = 3'd7;  // 8-word cache line fill
-
-assign ram_addr_mux = mem_pending ? req_addr[15:2] : live_mem_addr[15:2];
-assign ram_wren = accept_access && live_ram_select && |live_mem_wstrb;
-
-wire [2:0] live_sdram_word_idx = live_mem_addr[4:2];
-wire live_prefetch_line_hit = sdram_prefetch_valid &&
-                              live_sdram_select &&
-                              (live_mem_addr[25:5] == sdram_prefetch_line_tag);
-wire live_prefetch_word_available =
-    live_prefetch_line_hit && (sdram_prefetch_fill_count > {1'b0, live_sdram_word_idx});
-wire live_ibus_prefetch_hit = live_ibus_grant && !live_mem_write && live_prefetch_word_available;
-
-always @(*) begin
-    case (live_sdram_word_idx)
-        3'd0: prefetch_hit_rdata = sdram_prefetch_data[0];
-        3'd1: prefetch_hit_rdata = sdram_prefetch_data[1];
-        3'd2: prefetch_hit_rdata = sdram_prefetch_data[2];
-        3'd3: prefetch_hit_rdata = sdram_prefetch_data[3];
-        3'd4: prefetch_hit_rdata = sdram_prefetch_data[4];
-        3'd5: prefetch_hit_rdata = sdram_prefetch_data[5];
-        3'd6: prefetch_hit_rdata = sdram_prefetch_data[6];
-        3'd7: prefetch_hit_rdata = sdram_prefetch_data[7];
-    endcase
-end
-
-always @(posedge clk or posedge reset) begin
-    if (reset) begin
-        ibus_ack <= 0;
-        dbus_ack <= 0;
-        ibus_dat_miso <= 0;
-        dbus_dat_miso <= 0;
-        mem_pending <= 0;
-        pending_bus <= BUS_NONE;
-        last_grant_dbus <= 0;
-        req_addr <= 0;
-        req_wdata <= 0;
-        req_wstrb <= 0;
-        ram_pending <= 0;
-        term_pending <= 0;
-        sdram_read_pending <= 0;
-        sdram_write_pending <= 0;
-        sdram_read_started <= 0;
-        sdram_write_started <= 0;
-        sdram_cmd_issued <= 0;
-        sdram_read_is_prefetch <= 0;
-        sdram_prefetch_primary_done <= 0;
-        sdram_prefetch_line_tag <= 0;
-        sdram_prefetch_req_idx <= 0;
-        sdram_prefetch_fill_idx <= 0;
-        sdram_prefetch_fill_count <= 0;
-        sdram_prefetch_valid <= 0;
-        psram_read_pending <= 0;
-        psram_write_pending <= 0;
-        psram_read_started <= 0;
-        psram_write_started <= 0;
-        psram_cmd_issued <= 0;
-        psram_which <= 0;
-        sdram_issue_wait <= 0;
-        sdram_burst_len <= 0;
-        psram_issue_wait <= 0;
-        sysreg_pending <= 0;
-        audio_pending <= 0;
-        link_pending <= 0;
-        fbbram_pending <= 0;
-        link_reg_wr <= 0;
-        link_reg_rd <= 0;
-        link_reg_addr <= 0;
-        link_reg_wdata <= 0;
-        audio_sample_wr <= 0;
-        audio_sample_data <= 0;
-        sdram_rd <= 0;
-        sdram_wr <= 0;
-        sdram_addr <= 0;
-        sdram_wdata <= 0;
-        psram_rd <= 0;
-        psram_wr <= 0;
-        psram_addr <= 0;
-        psram_wdata <= 0;
-        psram_wstrb <= 0;
-        psram1_rd <= 0;
-        psram1_wr <= 0;
-        psram1_addr <= 0;
-        psram1_wdata <= 0;
-        psram1_wstrb <= 0;
-        pending_rdata <= 0;
-    end else begin
-        // Default: deassert ACKs and single-cycle signals
-        ibus_ack <= 0;
-        dbus_ack <= 0;
-        sdram_rd <= 0;
-        sdram_wr <= 0;
-        sdram_burst_len <= 3'd0;
-        psram_rd <= 0;
-        psram_wr <= 0;
-        psram1_rd <= 0;
-        psram1_wr <= 0;
-        audio_sample_wr <= 0;
-        link_reg_wr <= 0;
-        link_reg_rd <= 0;
-
-        if (!mem_pending && live_mem_valid) begin
-            if (live_ibus_prefetch_hit) begin
-                // Cache hit in completed SDRAM prefetch line.
-                ibus_ack <= 1;
-                ibus_dat_miso <= prefetch_hit_rdata;
-            end else begin
-                // Start new memory access
-                pending_bus <= live_dbus_grant ? BUS_DBUS : BUS_IBUS;
-                last_grant_dbus <= live_dbus_grant;
-                req_addr <= live_mem_addr;
-                req_wdata <= live_mem_wdata;
-                req_wstrb <= live_mem_wstrb;
-                if (live_ram_select) begin
-                    mem_pending <= 1;
-                    ram_pending <= 1;
-                end else if (live_sdram_select || live_sdram_uc_select) begin
-                    sdram_wdata <= live_mem_wdata;
-                    sdram_wstrb <= live_mem_wstrb;  // Pass byte enables to SDRAM
-                    if (live_mem_write) begin
-                        sdram_addr <= live_mem_addr[25:2];
-                        mem_pending <= 1;
-                        sdram_write_pending <= 1;
-                        sdram_read_started <= 0;
-                        sdram_write_started <= 0;
-                        sdram_cmd_issued <= 0;
-                        sdram_issue_wait <= 0;
-                        sdram_read_is_prefetch <= 0;
-                        // Any SDRAM write can invalidate the prefetched instruction line.
-                        sdram_prefetch_valid <= 0;
-                        sdram_prefetch_fill_count <= 0;
+                    // Issue AW to target slave
+                    fsm_state <= FSM_MEM_AW;
+                    if (lsu_aw_addr[31:26] == 6'b000100 || lsu_aw_addr[31:26] == 6'b010100) begin
+                        m_sdram_awvalid <= 1;
+                        m_sdram_awaddr <= lsu_aw_addr;
+                        m_sdram_awlen <= lsu_aw_len;
+                    end else if (lsu_aw_addr[31:27] == 5'b00110) begin
+                        m_psram_awvalid <= 1;
+                        m_psram_awaddr <= lsu_aw_addr;
+                        m_psram_awlen <= lsu_aw_len;
                     end else begin
-                        mem_pending <= 1;
-                        sdram_read_pending <= 1;
-                        sdram_read_started <= 0;
-                        sdram_write_started <= 0;
-                        sdram_cmd_issued <= 0;
-                        sdram_issue_wait <= 0;
-
-                        // Only prefetch cached instruction reads (0x1000....).
-                        if (live_sdram_select && live_ibus_grant) begin
-                            sdram_addr <= {live_mem_addr[25:5], 3'b000};  // 8-word line aligned
-                            sdram_burst_len <= SDRAM_PREFETCH_BURST_LEN;
-                            sdram_read_is_prefetch <= 1;
-                            sdram_prefetch_primary_done <= 0;
-                            sdram_prefetch_line_tag <= live_mem_addr[25:5];
-                            sdram_prefetch_req_idx <= live_mem_addr[4:2];
-                            sdram_prefetch_fill_idx <= 0;
-                            sdram_prefetch_fill_count <= 0;
-                            sdram_prefetch_valid <= 1;
-                        end else begin
-                            sdram_addr <= live_mem_addr[25:2];
-                            sdram_read_is_prefetch <= 0;
-                        end
-                    end
-                end else if (live_psram_select || live_psram1_select) begin
-                    // PSRAM0 (0x30) or PSRAM1 (0x31) - same FSM, different port
-                    psram_which <= live_psram1_select;  // 0=CRAM0, 1=CRAM1
-                    if (live_psram1_select) begin
-                        psram1_addr <= live_mem_addr[23:2];
-                        psram1_wdata <= live_mem_wdata;
-                        psram1_wstrb <= live_mem_wstrb;
-                    end else begin
-                        psram_addr <= live_mem_addr[23:2];
-                        psram_wdata <= live_mem_wdata;
-                        psram_wstrb <= live_mem_wstrb;
-                    end
-                    if (live_mem_write) begin
-                        mem_pending <= 1;
-                        psram_write_pending <= 1;
-                        psram_read_started <= 0;
-                        psram_write_started <= 0;
-                        psram_cmd_issued <= 0;
-                        psram_issue_wait <= 0;
-                    end else begin
-                        mem_pending <= 1;
-                        psram_read_pending <= 1;
-                        psram_read_started <= 0;
-                        psram_write_started <= 0;
-                        psram_cmd_issued <= 0;
-                        psram_issue_wait <= 0;
-                    end
-                end else if (live_fbbram_select) begin
-                    mem_pending <= 1;
-                    fbbram_pending <= 1;
-                end else if (live_term_select) begin
-                    mem_pending <= 1;
-                    term_pending <= 1;
-                end else if (live_sysreg_select) begin
-                    mem_pending <= 1;
-                    sysreg_pending <= 1;
-                end else if (live_audio_select) begin
-                    mem_pending <= 1;
-                    audio_pending <= 1;
-                    // Write to 0x4C000000: push sample to FIFO
-                    if (|live_mem_wstrb && live_mem_addr[3:2] == 2'b00) begin
-                        audio_sample_wr <= 1;
-                        audio_sample_data <= live_mem_wdata;
-                    end
-                end else if (live_link_select) begin
-                    mem_pending <= 1;
-                    link_pending <= 1;
-                    link_reg_addr <= live_mem_addr[6:2];
-                    if (|live_mem_wstrb) begin
-                        link_reg_wr <= 1;
-                        link_reg_wdata <= live_mem_wdata;
-                    end else begin
-                        // Pulse read so RX_DATA can pop on demand.
-                        link_reg_rd <= 1;
+                        m_local_awvalid <= 1;
+                        m_local_awaddr <= lsu_aw_addr;
+                        m_local_awlen <= lsu_aw_len;
                     end
                 end else begin
-                    // Unknown region - return 0 immediately
-                    if (live_dbus_grant) begin
-                        dbus_ack <= 1;
-                        dbus_dat_miso <= 32'h0;
+                    // W not ready yet - wait for it
+                    fsm_state <= FSM_WRITE_NEXT;
+                end
+
+            end else if (fetch_grant) begin
+                // Accept FetchL1 read (AR channel)
+                fetch_ar_ready <= 1;
+                active_bus <= BUS_FETCH;
+                is_write_r <= 0;
+                req_addr_r <= fetch_ar_addr;
+                req_id_r <= fetch_ar_id;
+                burst_len_r <= fetch_ar_len;
+                burst_count <= 0;
+                last_grant_lsu <= 0;
+
+                // Issue AR to target slave
+                fsm_state <= FSM_MEM_AR;
+                if (fetch_ar_addr[31:26] == 6'b000100 || fetch_ar_addr[31:26] == 6'b010100) begin
+                    target_mem <= TGT_SDRAM;
+                    m_sdram_arvalid <= 1;
+                    m_sdram_araddr <= fetch_ar_addr;
+                    m_sdram_arlen <= fetch_ar_len;
+                end else if (fetch_ar_addr[31:27] == 5'b00110) begin
+                    target_mem <= TGT_PSRAM;
+                    m_psram_arvalid <= 1;
+                    m_psram_araddr <= fetch_ar_addr;
+                    m_psram_arlen <= fetch_ar_len;
+                end else begin
+                    target_mem <= TGT_LOCAL;
+                    m_local_arvalid <= 1;
+                    m_local_araddr <= fetch_ar_addr;
+                    m_local_arlen <= fetch_ar_len;
+                end
+
+            end else if (io_grant) begin
+                // Accept IO bus command (single-beat)
+                io_cmd_ready <= 1;
+                active_bus <= BUS_IO;
+                burst_len_r <= 0;  // IO is always single-beat
+                burst_count <= 0;
+
+                // Address decode for IO bus:
+                // 0x50-0x53 (uncached SDRAM alias) → SDRAM target
+                // Everything else → Local target
+                if (io_cmd_addr[31:26] == 6'b010100) begin
+                    target_mem <= TGT_SDRAM;
+                end else begin
+                    target_mem <= TGT_LOCAL;
+                end
+
+                if (io_cmd_write) begin
+                    // IO write: issue AW + W simultaneously
+                    is_write_r <= 1;
+                    req_addr_r <= io_cmd_addr;
+                    req_wdata_r <= io_cmd_data;
+                    req_wstrb_r <= io_cmd_mask;
+
+                    fsm_state <= FSM_MEM_AW;
+                    if (io_cmd_addr[31:26] == 6'b010100) begin
+                        m_sdram_awvalid <= 1;
+                        m_sdram_awaddr <= io_cmd_addr;
+                        m_sdram_awlen <= 0;
                     end else begin
-                        ibus_ack <= 1;
-                        ibus_dat_miso <= 32'h0;
+                        m_local_awvalid <= 1;
+                        m_local_awaddr <= io_cmd_addr;
+                        m_local_awlen <= 0;
+                    end
+                end else begin
+                    // IO read: issue AR
+                    is_write_r <= 0;
+                    req_addr_r <= io_cmd_addr;
+
+                    fsm_state <= FSM_MEM_AR;
+                    if (io_cmd_addr[31:26] == 6'b010100) begin
+                        m_sdram_arvalid <= 1;
+                        m_sdram_araddr <= io_cmd_addr;
+                        m_sdram_arlen <= 0;
+                    end else begin
+                        m_local_arvalid <= 1;
+                        m_local_araddr <= io_cmd_addr;
+                        m_local_arlen <= 0;
                     end
                 end
             end
-        end else if (mem_pending) begin
-            // Complete pending access
-            if (ram_pending) begin
-                pending_rdata <= ram_rdata;
-                if (pending_bus == BUS_DBUS) begin
-                    dbus_ack <= 1;
-                    dbus_dat_miso <= ram_rdata;
-                end else begin
-                    ibus_ack <= 1;
-                    ibus_dat_miso <= ram_rdata;
-                end
-                mem_pending <= 0;
-                ram_pending <= 0;
-                pending_bus <= BUS_NONE;
-            end else if (sdram_read_pending) begin
-                // While draining an instruction prefetch burst, allow hits on already
-                // captured words so instruction fetch can advance within the same line.
-                if (sdram_read_is_prefetch && sdram_prefetch_primary_done && live_ibus_prefetch_hit) begin
-                    ibus_ack <= 1;
-                    ibus_dat_miso <= prefetch_hit_rdata;
-                end
+        end
 
-                // Issue read when controller is idle.
-                // Use sdram_accepted (from arbiter) to confirm command was forwarded,
-                // not sdram_busy which can rise from unrelated bridge/peripheral activity.
-                if (!sdram_cmd_issued) begin
-                    if (!sdram_busy) begin
-                        sdram_rd <= 1;
-                        sdram_cmd_issued <= 1;
-                        sdram_read_started <= 0;
-                        sdram_issue_wait <= 0;
-                    end
-                end else begin
-                    if (!sdram_read_started) begin
-                        if (sdram_accepted) begin
-                            sdram_read_started <= 1;
-                            sdram_issue_wait <= 0;
-                        end else begin
-                            sdram_issue_wait <= sdram_issue_wait + 1'b1;
-                            if (&sdram_issue_wait) begin
-                                // Command likely not accepted; retry.
-                                sdram_cmd_issued <= 0;
-                                sdram_issue_wait <= 0;
-                            end
-                        end
-                    end
-                    if (sdram_rdata_valid) begin
-                        if (sdram_read_is_prefetch) begin
-                            // Capture each word from the 8-word burst into the line buffer.
-                            case (sdram_prefetch_fill_idx)
-                                3'd0: sdram_prefetch_data[0] <= sdram_rdata;
-                                3'd1: sdram_prefetch_data[1] <= sdram_rdata;
-                                3'd2: sdram_prefetch_data[2] <= sdram_rdata;
-                                3'd3: sdram_prefetch_data[3] <= sdram_rdata;
-                                3'd4: sdram_prefetch_data[4] <= sdram_rdata;
-                                3'd5: sdram_prefetch_data[5] <= sdram_rdata;
-                                3'd6: sdram_prefetch_data[6] <= sdram_rdata;
-                                3'd7: sdram_prefetch_data[7] <= sdram_rdata;
-                            endcase
-                            sdram_prefetch_fill_count <= sdram_prefetch_fill_count + 1'b1;
-
-                            // First complete the original miss that triggered this burst.
-                            if (!sdram_prefetch_primary_done &&
-                                (sdram_prefetch_fill_idx == sdram_prefetch_req_idx)) begin
-                                pending_rdata <= sdram_rdata;
-                                if (pending_bus == BUS_DBUS) begin
-                                    dbus_ack <= 1;
-                                    dbus_dat_miso <= sdram_rdata;
-                                end else begin
-                                    ibus_ack <= 1;
-                                    ibus_dat_miso <= sdram_rdata;
-                                end
-                                sdram_prefetch_primary_done <= 1;
-                                pending_bus <= BUS_NONE;
-                            end
-
-                            // Burst done after 8 returned words.
-                            if (sdram_prefetch_fill_idx == 3'd7) begin
-                                if (!sdram_prefetch_primary_done) begin
-                                    // Safety fallback: never leave the original request unacked.
-                                    pending_rdata <= sdram_rdata;
-                                    if (pending_bus == BUS_DBUS) begin
-                                        dbus_ack <= 1;
-                                        dbus_dat_miso <= sdram_rdata;
-                                    end else begin
-                                        ibus_ack <= 1;
-                                        ibus_dat_miso <= sdram_rdata;
-                                    end
-                                end
-                                mem_pending <= 0;
-                                sdram_read_pending <= 0;
-                                sdram_read_started <= 0;
-                                sdram_write_started <= 0;
-                                sdram_cmd_issued <= 0;
-                                sdram_issue_wait <= 0;
-                                sdram_read_is_prefetch <= 0;
-                                pending_bus <= BUS_NONE;
-                            end
-                            sdram_prefetch_fill_idx <= sdram_prefetch_fill_idx + 1'b1;
-                        end else begin
-                            pending_rdata <= sdram_rdata;
-                            if (pending_bus == BUS_DBUS) begin
-                                dbus_ack <= 1;
-                                dbus_dat_miso <= sdram_rdata;
-                            end else begin
-                                ibus_ack <= 1;
-                                ibus_dat_miso <= sdram_rdata;
-                            end
-                            mem_pending <= 0;
-                            sdram_read_pending <= 0;
-                            sdram_read_started <= 0;
-                            sdram_write_started <= 0;
-                            sdram_cmd_issued <= 0;
-                            sdram_issue_wait <= 0;
-                            sdram_read_is_prefetch <= 0;
-                            pending_bus <= BUS_NONE;
-                        end
-                    end
-                end
-            end else if (sdram_write_pending) begin
-                if (!sdram_cmd_issued) begin
-                    if (!sdram_busy) begin
-                        sdram_wr <= 1;
-                        sdram_cmd_issued <= 1;
-                        sdram_write_started <= 0;
-                        sdram_issue_wait <= 0;
-                    end
-                end else begin
-                    // Write completion: wait for busy HIGH then LOW after command issue.
-                    // Note: using sdram_busy (not sdram_accepted) here because write
-                    // completion is detected by !sdram_busy, and we need word_busy to
-                    // have risen in io_sdram before we check for its fall.
-                    if (!sdram_write_started && sdram_busy) begin
-                        sdram_write_started <= 1;
-                        sdram_issue_wait <= 0;
-                    end else if (!sdram_write_started) begin
-                        sdram_issue_wait <= sdram_issue_wait + 1'b1;
-                        if (&sdram_issue_wait) begin
-                            sdram_cmd_issued <= 0;
-                            sdram_issue_wait <= 0;
-                        end
-                    end else if (sdram_write_started && !sdram_busy) begin
-                        if (pending_bus == BUS_DBUS) begin
-                            dbus_ack <= 1;
-                            dbus_dat_miso <= 32'h0;
-                        end else begin
-                            ibus_ack <= 1;
-                            ibus_dat_miso <= 32'h0;
-                        end
-                        mem_pending <= 0;
-                        sdram_write_pending <= 0;
-                        sdram_read_started <= 0;
-                        sdram_write_started <= 0;
-                        sdram_cmd_issued <= 0;
-                        sdram_issue_wait <= 0;
-                        sdram_read_is_prefetch <= 0;
-                        pending_bus <= BUS_NONE;
-                    end
-                end
-            end else if (psram_read_pending) begin
-                if (!psram_cmd_issued) begin
-                    if (!active_psram_busy) begin
-                        if (!psram_which) psram_rd <= 1; else psram1_rd <= 1;
-                        psram_cmd_issued <= 1;
-                        psram_read_started <= 0;
-                        psram_issue_wait <= 0;
-                    end
-                end else begin
-                    if (!psram_read_started) begin
-                        if (active_psram_busy) begin
-                            psram_read_started <= 1;
-                            psram_issue_wait <= 0;
-                        end else begin
-                            psram_issue_wait <= psram_issue_wait + 1'b1;
-                            if (&psram_issue_wait) begin
-                                psram_cmd_issued <= 0;
-                                psram_issue_wait <= 0;
-                            end
-                        end
-                    end
-                    if (active_psram_rdata_valid) begin
-                        pending_rdata <= active_psram_rdata;
-                        if (pending_bus == BUS_DBUS) begin
-                            dbus_ack <= 1;
-                            dbus_dat_miso <= active_psram_rdata;
-                        end else begin
-                            ibus_ack <= 1;
-                            ibus_dat_miso <= active_psram_rdata;
-                        end
-                        mem_pending <= 0;
-                        psram_read_pending <= 0;
-                        psram_read_started <= 0;
-                        psram_write_started <= 0;
-                        psram_cmd_issued <= 0;
-                        psram_issue_wait <= 0;
-                        pending_bus <= BUS_NONE;
-                    end
-                end
-            end else if (psram_write_pending) begin
-                if (!psram_cmd_issued) begin
-                    if (!active_psram_busy) begin
-                        if (!psram_which) psram_wr <= 1; else psram1_wr <= 1;
-                        psram_cmd_issued <= 1;
-                        psram_write_started <= 0;
-                        psram_issue_wait <= 0;
-                    end
-                end else begin
-                    // Write completion: wait for busy HIGH then LOW after command issue.
-                    // If busy never rises, retry command.
-                    if (!psram_write_started && active_psram_busy) begin
-                        psram_write_started <= 1;
-                        psram_issue_wait <= 0;
-                    end else if (!psram_write_started) begin
-                        psram_issue_wait <= psram_issue_wait + 1'b1;
-                        if (&psram_issue_wait) begin
-                            psram_cmd_issued <= 0;
-                            psram_issue_wait <= 0;
-                        end
-                    end else if (psram_write_started && !active_psram_busy) begin
-                        if (pending_bus == BUS_DBUS) begin
-                            dbus_ack <= 1;
-                            dbus_dat_miso <= 32'h0;
-                        end else begin
-                            ibus_ack <= 1;
-                            ibus_dat_miso <= 32'h0;
-                        end
-                        mem_pending <= 0;
-                        psram_write_pending <= 0;
-                        psram_read_started <= 0;
-                        psram_write_started <= 0;
-                        psram_cmd_issued <= 0;
-                        psram_issue_wait <= 0;
-                        pending_bus <= BUS_NONE;
-                    end
-                end
-            end else if (term_pending && term_mem_ready) begin
-                if (pending_bus == BUS_DBUS) begin
-                    dbus_ack <= 1;
-                    dbus_dat_miso <= term_mem_rdata;
-                end else begin
-                    ibus_ack <= 1;
-                    ibus_dat_miso <= term_mem_rdata;
-                end
-                mem_pending <= 0;
-                term_pending <= 0;
-                pending_bus <= BUS_NONE;
-            end else if (fbbram_pending) begin
-                // BRAM FB: 1-cycle latency for reads (write already done combinationally)
-                if (pending_bus == BUS_DBUS) begin
-                    dbus_ack <= 1;
-                    dbus_dat_miso <= fb_bram_cpu_rdata;
-                end else begin
-                    ibus_ack <= 1;
-                    ibus_dat_miso <= fb_bram_cpu_rdata;
-                end
-                mem_pending <= 0;
-                fbbram_pending <= 0;
-                pending_bus <= BUS_NONE;
-            end else if (sysreg_pending) begin
-                if (pending_bus == BUS_DBUS) begin
-                    dbus_ack <= 1;
-                    dbus_dat_miso <= sysreg_rdata;
-                end else begin
-                    ibus_ack <= 1;
-                    ibus_dat_miso <= sysreg_rdata;
-                end
-                mem_pending <= 0;
-                sysreg_pending <= 0;
-                pending_bus <= BUS_NONE;
-            end else if (audio_pending) begin
-                // Audio registers respond in 1 cycle
-                // Read from 0x4C000004: return FIFO status
-                if (pending_bus == BUS_DBUS) begin
-                    dbus_ack <= 1;
-                    dbus_dat_miso <= {19'b0, audio_fifo_full, audio_fifo_level};
-                end else begin
-                    ibus_ack <= 1;
-                    ibus_dat_miso <= {19'b0, audio_fifo_full, audio_fifo_level};
-                end
-                mem_pending <= 0;
-                audio_pending <= 0;
-                pending_bus <= BUS_NONE;
-            end else if (link_pending) begin
-                // Link MMIO registers respond in 1 cycle
-                if (pending_bus == BUS_DBUS) begin
-                    dbus_ack <= 1;
-                    dbus_dat_miso <= link_reg_rdata;
-                end else begin
-                    ibus_ack <= 1;
-                    ibus_dat_miso <= link_reg_rdata;
-                end
-                mem_pending <= 0;
-                link_pending <= 0;
-                pending_bus <= BUS_NONE;
+        // ============================================
+        // MEM_AR: Wait for target arready
+        // ============================================
+        FSM_MEM_AR: begin
+            if (mem_arready) begin
+                m_sdram_arvalid <= 0;
+                m_psram_arvalid <= 0;
+                m_local_arvalid <= 0;
+                fsm_state <= FSM_MEM_R;
             end
         end
+
+        // ============================================
+        // MEM_R: Forward R beats to requester
+        // ============================================
+        FSM_MEM_R: begin
+            if (mem_rvalid) begin
+                if (active_bus == BUS_FETCH) begin
+                    fetch_r_valid <= 1;
+                    fetch_r_data <= mem_rdata;
+                    fetch_r_id <= req_id_r;
+                    fetch_r_last <= beat_is_last;
+                end else if (active_bus == BUS_LSU) begin
+                    lsu_r_valid <= 1;
+                    lsu_r_data <= mem_rdata;
+                    lsu_r_id <= req_id_r;
+                    lsu_r_last <= beat_is_last;
+                end else begin
+                    // BUS_IO: single-beat read response
+                    io_rsp_valid <= 1;
+                    io_rsp_data <= mem_rdata;
+                    io_rsp_error <= 0;
+                end
+                burst_count <= burst_count + 1;
+                if (beat_is_last)
+                    fsm_state <= FSM_IDLE;
+            end
+        end
+
+        // ============================================
+        // MEM_AW: Wait for target awready, then send W
+        // ============================================
+        FSM_MEM_AW: begin
+            if (mem_awready) begin
+                m_sdram_awvalid <= 0;
+                m_psram_awvalid <= 0;
+                m_local_awvalid <= 0;
+                // Send W beat
+                fsm_state <= FSM_MEM_W;
+                if (target_mem == TGT_SDRAM) begin
+                    m_sdram_wvalid <= 1;
+                    m_sdram_wdata <= req_wdata_r;
+                    m_sdram_wstrb <= req_wstrb_r;
+                    m_sdram_wlast <= beat_is_last;
+                end else if (target_mem == TGT_PSRAM) begin
+                    m_psram_wvalid <= 1;
+                    m_psram_wdata <= req_wdata_r;
+                    m_psram_wstrb <= req_wstrb_r;
+                    m_psram_wlast <= beat_is_last;
+                end else begin
+                    m_local_wvalid <= 1;
+                    m_local_wdata <= req_wdata_r;
+                    m_local_wstrb <= req_wstrb_r;
+                    m_local_wlast <= beat_is_last;
+                end
+            end
+        end
+
+        // ============================================
+        // MEM_W: Wait for target wready
+        // ============================================
+        FSM_MEM_W: begin
+            if (mem_wready) begin
+                m_sdram_wvalid <= 0;
+                m_psram_wvalid <= 0;
+                m_local_wvalid <= 0;
+                burst_count <= burst_count + 1;
+                if (beat_is_last) begin
+                    fsm_state <= FSM_MEM_B;
+                end else begin
+                    req_addr_r <= req_addr_r + 32'd4;
+                    fsm_state <= FSM_WRITE_NEXT;
+                end
+            end
+        end
+
+        // ============================================
+        // MEM_B: Wait for target bvalid, forward response
+        // ============================================
+        FSM_MEM_B: begin
+            if (mem_bvalid) begin
+                if (active_bus == BUS_IO) begin
+                    // IO write complete
+                    io_rsp_valid <= 1;
+                    io_rsp_data <= 0;
+                    io_rsp_error <= 0;
+                end else begin
+                    // LSU write complete
+                    lsu_b_valid <= 1;
+                    lsu_b_id <= req_id_r;
+                end
+                fsm_state <= FSM_IDLE;
+            end
+        end
+
+        // ============================================
+        // WRITE_NEXT: Accept next W beat from VexiiRiscv, forward to target
+        // ============================================
+        FSM_WRITE_NEXT: begin
+            if (lsu_w_valid) begin
+                lsu_w_ready <= 1;
+                req_wdata_r <= lsu_w_data;
+                req_wstrb_r <= lsu_w_strb;
+
+                // Issue AW if we haven't yet (first beat case where W wasn't ready)
+                // or send W beat for subsequent beats
+                if (burst_count == 0 && !m_sdram_awvalid && !m_psram_awvalid && !m_local_awvalid) begin
+                    // First beat: we accepted AW from VexiiRiscv but haven't issued AW to target yet
+                    fsm_state <= FSM_MEM_AW;
+                    if (target_mem == TGT_SDRAM) begin
+                        m_sdram_awvalid <= 1;
+                        m_sdram_awaddr <= req_addr_r;
+                        m_sdram_awlen <= burst_len_r;
+                    end else if (target_mem == TGT_PSRAM) begin
+                        m_psram_awvalid <= 1;
+                        m_psram_awaddr <= req_addr_r;
+                        m_psram_awlen <= burst_len_r;
+                    end else begin
+                        m_local_awvalid <= 1;
+                        m_local_awaddr <= req_addr_r;
+                        m_local_awlen <= burst_len_r;
+                    end
+                end else begin
+                    // Subsequent beat: send W to target
+                    fsm_state <= FSM_MEM_W;
+                    if (target_mem == TGT_SDRAM) begin
+                        m_sdram_wvalid <= 1;
+                        m_sdram_wdata <= lsu_w_data;
+                        m_sdram_wstrb <= lsu_w_strb;
+                        m_sdram_wlast <= (burst_count == burst_len_r);
+                    end else if (target_mem == TGT_PSRAM) begin
+                        m_psram_wvalid <= 1;
+                        m_psram_wdata <= lsu_w_data;
+                        m_psram_wstrb <= lsu_w_strb;
+                        m_psram_wlast <= (burst_count == burst_len_r);
+                    end else begin
+                        m_local_wvalid <= 1;
+                        m_local_wdata <= lsu_w_data;
+                        m_local_wstrb <= lsu_w_strb;
+                        m_local_wlast <= (burst_count == burst_len_r);
+                    end
+                end
+            end
+        end
+
+        default: fsm_state <= FSM_IDLE;
+
+        endcase
     end
 end
 

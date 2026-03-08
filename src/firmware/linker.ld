@@ -3,18 +3,19 @@
  *
  * Two-stage boot:
  * - Bootloader: 64KB BRAM at 0x00000000 (initialized from firmware.mif)
- * - App binary: bridge loads to SDRAM at 0x10200000,
- *   bootloader copies to PSRAM at 0x30000000 for execution
- * - Asset data: bridge loads to SDRAM at 0x11000000 (cached access)
+ * - App binary: deferload from SD card into SDRAM at 0x10200000
+ *   (runs in-place from SDRAM, no PSRAM copy)
  *
  * Memory layout:
  * - BRAM:     0x00000000 (64KB)  - Bootloader code, stack
- * - SDRAM:    0x10000000 (64MB)  - Staging area + BSS + Heap
- *   - 0x10200000: sm64.bin LMA (bridge loads here, copied to PSRAM)
- *   - 0x11000000: assets (bridge loads here)
- *   - 0x12400000: BSS + Heap (~28MB)
+ * - SDRAM:    0x10000000 (64MB)  - App code + data + BSS + Heap
+ *   - 0x10200000: sm64.bin (deferloaded, code+rodata+data)
+ *   - After sm64.bin: BSS + Heap
+ *   - 0x13000000: Runtime stack (512KB, grows down)
+ *   - 0x13E00000: Dataslot param/resp buffers
+ *   - 0x13F00000: DMA bounce buffer
  * - Terminal: 0x20000000 (8KB)   - Character VRAM
- * - PSRAM:    0x30000000 (16MB)  - App code + data (CRAM0)
+ * - PSRAM:    0x30000000 (16MB)  - Available (CRAM0, unused for now)
  * - SRAM:     0x38000000 (256KB) - Z-buffer
  * - SysRegs:  0x40000000         - System control registers
  */
@@ -23,20 +24,15 @@ ENTRY(_start)
 
 MEMORY {
     BRAM      (rwx) : ORIGIN = 0x00000000, LENGTH = 64K
-    PSRAM     (rwx) : ORIGIN = 0x30000000, LENGTH = 16M     /* App code VMA (CRAM0) */
-    SDRAM_BSS (rwx) : ORIGIN = 0x12400000, LENGTH = 28M     /* BSS + Heap in SDRAM after assets */
+    SDRAM_APP (rwx) : ORIGIN = 0x10200000, LENGTH = 44M   /* App code + BSS + heap */
 }
 
 /* SDRAM layout symbols */
 __sdram_base = 0x10000000;
 __sdram_size = 64M;
 
-/* App binary: VMA in PSRAM, LMA in SDRAM (bridge loads to SDRAM) */
-__app_entry = 0x30000000;
+/* App binary: both VMA and LMA in SDRAM (deferloaded, runs in-place) */
 __app_load_addr = 0x10200000;
-
-/* Asset data location (cached SDRAM, loaded by bridge) */
-__assets_base = 0x11000000;
 
 SECTIONS {
     /* Bootloader code - in BRAM, runs at startup */
@@ -71,8 +67,7 @@ SECTIONS {
         __bss_end = .;
     } > BRAM
 
-    /* Hot app code/data pinned in BRAM for lower latency.
-     * Included in boot image generation (firmware.mif). */
+    /* Hot app code/data pinned in BRAM for lower latency. */
     .fasttext : {
         . = ALIGN(4);
         __fasttext_start = .;
@@ -90,36 +85,31 @@ SECTIONS {
         __fastdata_end = .;
     } > BRAM
 
-    /* === PSRAM sections: App code VMA in PSRAM, LMA in SDRAM === */
+    /* === SDRAM sections: App code runs in-place from SDRAM === */
 
-    /* App code section - executes from PSRAM, loaded to SDRAM by bridge */
-    .text __app_entry : AT(__app_load_addr) {
+    /* App code section */
+    .text __app_load_addr : {
         __text_start = .;
-        KEEP(*(.text*))        /* All code (except boot) - KEEP to prevent gc */
-        KEEP(*(.rodata*))      /* Read-only data */
-        KEEP(*(.srodata*))     /* Small read-only data (float constants) */
+        KEEP(*(.text*))
+        KEEP(*(.rodata*))
+        KEEP(*(.srodata*))
         . = ALIGN(4);
         __text_end = .;
-    } > PSRAM
+    } > SDRAM_APP
 
-    /* App initialized data - LMA must mirror VMA offset so bootloader's
-     * flat copy places .data at the correct PSRAM address.  Using SIZEOF(.text)
-     * would make the LMA contiguous even when VMA has alignment padding,
-     * shifting all initialized data by the padding amount. */
-    .data : AT(__app_load_addr + (__data_start - __text_start)) {
+    /* App initialized data */
+    .data : {
         __data_start = .;
         KEEP(*(.data*))
         KEEP(*(.sdata*))
         . = ALIGN(4);
         __data_end = .;
-    } > PSRAM
+    } > SDRAM_APP
 
-    /* Copy region symbols for bootloader */
-    __app_copy_src = LOADADDR(.text);            /* SDRAM LMA */
-    __app_copy_dst = __text_start;               /* PSRAM VMA */
-    __app_copy_size = __data_end - __text_start;
+    /* Size of code+data that must be deferloaded */
+    __app_load_size = __data_end - __text_start;
 
-    /* App uninitialized data (BSS) - in SDRAM after asset area */
+    /* App BSS - immediately after data in SDRAM */
     .qbss : {
         . = ALIGN(4);
         __qbss_start = .;
@@ -128,14 +118,12 @@ SECTIONS {
         *(COMMON)
         . = ALIGN(4);
         __qbss_end = .;
-    } > SDRAM_BSS
+    } > SDRAM_APP
 
-    /* Heap starts after BSS in SDRAM_BSS region.
-     * Reserve a dedicated runtime stack at top of SDRAM to keep game stack
-     * away from BRAM boot code. */
+    /* Heap starts after BSS */
     __heap_start = __qbss_end;
-    __runtime_stack_top = 0x13000000;          /* Conservative known-good SDRAM region */
-    __runtime_stack_size = 512K;               /* 512 KB runtime stack */
+    __runtime_stack_top = 0x13000000;
+    __runtime_stack_size = 512K;
     __runtime_stack_bottom = __runtime_stack_top - __runtime_stack_size;
     __heap_end = __runtime_stack_bottom;
 
@@ -152,10 +140,8 @@ SECTIONS {
     PROVIDE(_heap_start = __heap_start);
     PROVIDE(_heap_end = __heap_end);
     PROVIDE(_runtime_stack_top = __runtime_stack_top);
-    PROVIDE(_app_entry = __app_entry);
-    PROVIDE(_app_copy_src = __app_copy_src);
-    PROVIDE(_app_copy_dst = __app_copy_dst);
-    PROVIDE(_app_copy_size = __app_copy_size);
+    PROVIDE(_app_load_addr = __app_load_addr);
+    PROVIDE(_app_load_size = __app_load_size);
 
     /* Keep at least 8 KB BRAM stack/trap headroom after hot sections. */
     ASSERT(__fastdata_end <= (__stack_top - 8192), "BRAM overflow: insufficient stack headroom")

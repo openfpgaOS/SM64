@@ -1,7 +1,11 @@
 /*
- * VexRiscv startup code
+ * VexiiRiscv startup code
  * Sets up stack pointer and jumps to main
  * Includes trap handler for misaligned access emulation and crash debugging
+ *
+ * Trap handling uses mscratch to hold the BRAM trap stack pointer.
+ * On trap entry, csrrw atomically swaps sp <-> mscratch, giving us a
+ * safe stack without clobbering the original sp.
  */
 
 .section .text.start
@@ -12,18 +16,15 @@ _start:
     lui sp, %hi(_stack_top)
     addi sp, sp, %lo(_stack_top)
 
-    /* Check if this is a trap (exception re-entry) or cold boot.
-     * On cold boot, mcause is 0. On exception, mcause is non-zero.
-     * VexRiscv jumps to mtvec (address 0) on any exception. */
-    csrr t0, mcause
-    bnez t0, _trap_entry
-
     /* Enable FPU: set mstatus.FS = 11 (Dirty) — bits [14:13] */
     li t0, (3 << 13)
     csrs mstatus, t0
 
-    /* Set mtvec to point to our trap handler (address 0 = _start) */
-    la t0, _start
+    /* Set mscratch = trap stack top (used by trap vector for sp swap) */
+    csrw mscratch, sp
+
+    /* Set mtvec to trap vector (separate from cold boot entry) */
+    la t0, _trap_vector
     csrw mtvec, t0
 
     /* Mark that we've booted (store magic value at fixed BRAM address) */
@@ -52,7 +53,15 @@ halt:
 
 
 /* ========================================
- * Trap entry - saves all integer + float registers and dispatches
+ * Trap vector — entered via mtvec on any exception.
+ *
+ * mscratch holds the BRAM trap stack top.
+ * csrrw atomically swaps sp <-> mscratch so we get a safe stack
+ * and preserve the original sp in mscratch.
+ *
+ * Supports nested traps: after saving original sp, we restore
+ * mscratch to the new trap stack top (frame allocated below it).
+ *
  * Trap frame layout:
  *   x0-x31  (32 words) at sp+0   .. sp+124
  *   mepc    (1 word)   at sp+128
@@ -61,26 +70,32 @@ halt:
  *   f0-f31  (32 words) at sp+140 .. sp+264
  * Total: 67 words = 268 bytes (round to 272 for 8-byte alignment)
  * ======================================== */
-_trap_entry:
-    /* We need a safe stack. Use top of BRAM scratch area temporarily.
-     * Save current sp first so we can include it in the frame. */
-    csrw mscratch, sp
-
-    /* Switch to trap stack in BRAM */
-    lui sp, %hi(_stack_top)
-    addi sp, sp, %lo(_stack_top)
+_trap_vector:
+    /* Atomically swap sp <-> mscratch.
+     * After this: sp = BRAM trap stack top, mscratch = original sp */
+    csrrw sp, mscratch, sp
 
     /* Allocate trap frame: 272 bytes */
     addi sp, sp, -272
 
-    /* Save x1-x31 (skip x0 which is always 0) */
+    /* Save t0 first — we need it as a working register */
+    sw x5,  20(sp)
+
+    /* Save original sp from mscratch */
+    csrr x5, mscratch
+    sw x5,   8(sp)
+
+    /* Restore mscratch = current trap stack top for nested trap safety.
+     * If a nested trap occurs (e.g. in term_printf), it will allocate
+     * another frame below this one on the same BRAM stack. */
+    mv x5, sp
+    csrw mscratch, x5
+
+    /* Save x1, x3-x4 (x0 is always 0, x2/sp saved above, x5/t0 saved above) */
     sw x1,   4(sp)
-    /* x2 (sp) - save the original sp from mscratch */
-    csrr t0, mscratch
-    sw t0,   8(sp)
     sw x3,  12(sp)
     sw x4,  16(sp)
-    sw x5,  20(sp)
+    /* x5 (t0) already saved at offset 20 */
     sw x6,  24(sp)
     sw x7,  28(sp)
     sw x8,  32(sp)
@@ -199,14 +214,12 @@ _trap_entry:
     flw f30, 260(sp)
     flw f31, 264(sp)
 
-    /* Restore integer registers */
+    /* Restore integer registers (except sp and t0, handled below) */
     lw x1,   4(sp)
-    /* Restore original sp to mscratch temporarily */
-    lw t0,   8(sp)
-    csrw mscratch, t0
+    /* x2 (sp) restored via csrrw below */
     lw x3,  12(sp)
     lw x4,  16(sp)
-    lw x5,  20(sp)
+    /* x5 (t0) restored last */
     lw x6,  24(sp)
     lw x7,  28(sp)
     lw x8,  32(sp)
@@ -234,8 +247,15 @@ _trap_entry:
     lw x30, 120(sp)
     lw x31, 124(sp)
 
-    /* Restore original sp from mscratch */
-    csrr sp, mscratch
+    /* Restore original sp and mscratch for future traps.
+     * Load original sp into mscratch, then swap sp <-> mscratch.
+     * This restores sp to the original value and sets mscratch
+     * back to the BRAM trap stack top (current sp after dealloc). */
+    lw x5,   8(sp)         /* x5 = original sp */
+    csrw mscratch, x5      /* mscratch = original sp */
+    lw x5,  20(sp)         /* restore original t0 */
+    addi sp, sp, 272       /* deallocate trap frame; sp = trap stack top */
+    csrrw sp, mscratch, sp /* sp = original sp, mscratch = trap stack top */
 
     /* Return from trap */
     mret

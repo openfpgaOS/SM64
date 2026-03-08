@@ -17,7 +17,7 @@
 #include "macros.h"
 #include "gfx/gfx_window_manager_api.h"
 #include "gfx/gfx_soft.h"
-#include "font8x8.h"
+extern void term_printf(const char *fmt, ...);
 
 /* System register MMIO */
 #define SYS_STATUS          (*(volatile uint32_t *)0x40000000)
@@ -30,11 +30,11 @@
 #define SYS_PAL_INDEX       (*(volatile uint32_t *)0x40000040)
 #define SYS_PAL_DATA        (*(volatile uint32_t *)0x40000044)
 
-/* BRAM framebuffer at 0x08000000 (mapped in FPGA, dual-port, no cache needed) */
-#define FB_BRAM_BASE  ((volatile uint32_t *)0x08000000)
+/* Uncached SDRAM alias base (bypasses D-cache, visible to video DMA scanout) */
+#define SDRAM_UC_BASE 0x50000000
 
-#define SCREEN_WIDTH  160
-#define SCREEN_HEIGHT 120
+#define SCREEN_WIDTH  320
+#define SCREEN_HEIGHT 240
 
 /* Cycle counter for timing */
 static inline uint64_t get_cycles(void) {
@@ -65,11 +65,15 @@ static void setup_rgb332_palette(void) {
     }
 }
 
-/* Convert RGBA32 framebuffer to RGB332 and write to BRAM (160x120, no upscale).
+/* Convert RGBA32 framebuffer to RGB332 and write to uncached SDRAM draw buffer.
  * Hardware does 2x pixel/line replication in the FPGA video scanout.
- * Writes 4 pixels at a time as 32-bit words for efficiency (4,800 word writes). */
+ * Writes 4 pixels at a time as 32-bit words for efficiency (4,800 word writes).
+ * Uses uncached SDRAM alias (0x50xxxxxx) so writes are immediately visible to
+ * the video DMA scanout without requiring D-cache flush. */
 static void convert_rgba32_to_rgb332(void) {
-    volatile uint32_t *dst = FB_BRAM_BASE;
+    /* Get current draw buffer (25-bit SDRAM 16-bit-word address) */
+    uint32_t draw_word_addr = SYS_FB_DRAW;
+    volatile uint32_t *dst = (volatile uint32_t *)(SDRAM_UC_BASE + (draw_word_addr << 1));
     const uint32_t *src = gfx_output;
     int total = SCREEN_WIDTH * SCREEN_HEIGHT;
 
@@ -83,12 +87,15 @@ static void convert_rgba32_to_rgb332(void) {
     }
 }
 
+/* Defer display mode switch until first frame is ready,
+ * so terminal output stays visible during init for diagnostics. */
+static bool fb_mode_active = false;
+
 static void gfx_pocket_init(UNUSED const char *game_name, UNUSED bool start_in_fullscreen) {
     /* Set up the RGB332 palette in FPGA hardware */
     setup_rgb332_palette();
 
-    /* Switch to framebuffer display mode */
-    SYS_DISPLAY_MODE = 1;
+    /* Don't switch to FB mode yet — wait until first frame is rendered */
 }
 
 static void gfx_pocket_set_keyboard_callbacks(
@@ -122,43 +129,16 @@ static bool gfx_pocket_start_frame(void) {
     return true;
 }
 
-/* Debug overlay: draw text into 160x120 BRAM framebuffer */
-extern char dbg_overlay_line[80];
-
-static void dbg_draw_char(volatile uint8_t *fb, int px, int py, char c) {
-    if (c < 32 || c > 127) return;
-    const uint8_t *glyph = font8x8[c - 32];
-    for (int row = 0; row < 8; row++) {
-        int y = py + row;
-        if ((unsigned)y >= SCREEN_HEIGHT) continue;
-        volatile uint8_t *dst = fb + y * SCREEN_WIDTH + px;
-        uint8_t bits = glyph[row];
-        for (int col = 0; col < 8; col++) {
-            int x = px + col;
-            if ((unsigned)x >= SCREEN_WIDTH) continue;
-            dst[col] = (bits & (0x80 >> col)) ? 0xFF : 0x00;
-        }
-    }
-}
-
-static void dbg_draw_overlay(volatile uint8_t *fb) {
-    int x = 1, y = 1;
-    for (const char *s = dbg_overlay_line; *s; s++) {
-        if (*s == '\n') { x = 1; y += 9; continue; }
-        dbg_draw_char(fb, x, y, *s);
-        x += 8;
-    }
-}
-
 static void gfx_pocket_swap_buffers_begin(void) {
-    /* Convert the software rasterizer output to the BRAM framebuffer */
+    /* Convert the software rasterizer output to the SDRAM draw buffer */
     if (gfx_output != NULL) {
         convert_rgba32_to_rgb332();
     }
 
-    /* Draw debug overlay on top of converted framebuffer */
-    if (dbg_overlay_line[0]) {
-        dbg_draw_overlay((volatile uint8_t *)FB_BRAM_BASE);
+    /* Switch to FB mode on first frame */
+    if (!fb_mode_active) {
+        fb_mode_active = true;
+        SYS_DISPLAY_MODE = 1;
     }
 
     /* Request buffer flip (happens on next vblank) */

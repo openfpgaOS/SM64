@@ -204,9 +204,14 @@ void mtx4_translate(Mtx4 dest, Vec3fx b) {
 
 void mtx4_to_mtx(Mtx *dest, Mtx4 src) {
 #ifdef GBI_FLOATS
-    // Pack raw Q16.16 values into Mtx storage (reinterpret float[4][4] as fx32[4][4]).
-    // gfx_sp_matrix reads these as fx32 directly — zero conversion overhead.
-    __builtin_memcpy(dest->m, src, 64);
+    // Convert Q16.16 internal matrix to float Mtx for the rendering pipeline.
+    {
+        register s32 i;
+        f32 *d = (f32 *)dest->m;
+        fx32 *s = (fx32 *)src;
+        for (i = 0; i < 16; i++)
+            d[i] = (f32)s[i] / 65536.0f;
+    }
 #else
     // N64 split integer/fraction format
     register s32 r, c;

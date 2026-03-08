@@ -158,7 +158,8 @@ LDFLAGS = -march=$(ARCH) -mabi=$(ABI)
 LDFLAGS += -T linker.ld -nostdlib -nostartfiles
 LDFLAGS += -Wl,--gc-sections
 LDFLAGS += -Wl,-Map=$(TARGET).map
-LDFLAGS += -flto
+# LTO disabled: causes single-float/double-float mismatch with float math
+#LDFLAGS += -flto
 
 # libgcc
 LIBGCC = $(shell $(CC) -march=$(ARCH) -mabi=$(ABI) -print-libgcc-file-name)

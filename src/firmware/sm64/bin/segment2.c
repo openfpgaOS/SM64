@@ -2498,16 +2498,7 @@ static const Lights1 segment2_lights_unused = gdSPDefLights1(
 );
 
 // 0x02014470 - 0x020144B0
-#if defined(GBI_FLOATS) && defined(TARGET_POCKET)
-// On TARGET_POCKET, Mtx stores raw Q16.16 packed into float[4][4] storage.
-// Use union to set correct bit patterns (float initializers would be wrong).
-static const union { int32_t i[4][4]; Mtx mtx; } _matrix_identity_raw = { .i = {
-    {0x00010000, 0, 0, 0},
-    {0, 0x00010000, 0, 0},
-    {0, 0, 0x00010000, 0},
-    {0, 0, 0, 0x00010000}
-}};
-#define matrix_identity (_matrix_identity_raw.mtx)
+#if 0 /* was TARGET_POCKET fx32 — now uses float like other GBI_FLOATS platforms */
 #else
 static const Mtx matrix_identity = {
 #ifndef GBI_FLOATS
@@ -2530,14 +2521,7 @@ static const Mtx matrix_identity = {
 
 
 // 0x020144B0 - 0x020144F0
-#if defined(GBI_FLOATS) && defined(TARGET_POCKET)
-static const union { int32_t i[4][4]; Mtx mtx; } _matrix_fullscreen_raw = { .i = {
-    {2 * 65536 / SCREEN_WIDTH, 0, 0, 0},
-    {0, 2 * 65536 / SCREEN_HEIGHT, 0, 0},
-    {0, 0, -65536, 0},
-    {-65536, -65536, -65536, 65536}
-}};
-#define matrix_fullscreen (_matrix_fullscreen_raw.mtx)
+#if 0 /* was TARGET_POCKET fx32 */
 #else
 static const Mtx matrix_fullscreen = {
 #ifndef GBI_FLOATS
