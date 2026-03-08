@@ -117,7 +117,13 @@ module axi_periph_slave (
     output reg  [3:0]  cpu_sram_wstrb,
     input wire         cpu_sram_busy,
     input wire  [31:0] cpu_sram_q,
-    input wire         cpu_sram_q_valid
+    input wire         cpu_sram_q_valid,
+
+    // SDRAM fill engine register interface
+    output reg         fill_reg_wr,
+    output wire [4:0]  fill_reg_addr,
+    output reg  [31:0] fill_reg_wdata,
+    input wire  [31:0] fill_reg_rdata
 );
 
 wire reset = ~reset_n;
@@ -453,9 +459,13 @@ end
 // ============================================
 // Peripheral read data mux (combinatorial)
 // ============================================
+// Fill engine register address: combinatorial so reads always see the correct register
+assign fill_reg_addr = req_addr[6:2];
+
 wire [31:0] periph_rd_mux = reg_sysreg   ? sysreg_rdata :
                              reg_audio    ? {19'b0, audio_fifo_full, audio_fifo_level} :
                              reg_link     ? link_reg_rdata :
+                             reg_fill     ? fill_reg_rdata :
                              32'h0;
 
 // ============================================
@@ -487,6 +497,7 @@ reg reg_sysreg;
 reg reg_audio;
 reg reg_link;
 reg reg_sram;
+reg reg_fill;
 
 // Whether this beat is the last of a burst
 wire beat_is_last = (burst_count == burst_len);
@@ -536,6 +547,7 @@ wire ar_dec_sysreg = (ar_addr[31:8]  == 24'h400000);
 wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
 wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
 wire ar_dec_sram   = (ar_addr[31:24] == 8'h38);
+wire ar_dec_fill   = (ar_addr[31:24] == 8'h44);
 
 wire aw_dec_ram    = (aw_addr[31:16] == 16'b0);
 wire aw_dec_term   = (aw_addr[31:13] == 19'h10000);
@@ -543,6 +555,7 @@ wire aw_dec_sysreg = (aw_addr[31:8]  == 24'h400000);
 wire aw_dec_audio  = (aw_addr[31:24] == 8'h4C);
 wire aw_dec_link   = (aw_addr[31:24] == 8'h4D);
 wire aw_dec_sram   = (aw_addr[31:24] == 8'h38);
+wire aw_dec_fill   = (aw_addr[31:24] == 8'h44);
 
 // ============================================
 // Main FSM
@@ -573,7 +586,11 @@ always @(posedge clk or posedge reset) begin
         reg_audio <= 0;
         reg_link <= 0;
         reg_sram <= 0;
+        reg_fill <= 0;
         sram_accepted <= 0;
+
+        fill_reg_wr <= 0;
+        fill_reg_wdata <= 0;
 
         cpu_sram_rd <= 0;
         cpu_sram_wr <= 0;
@@ -599,6 +616,7 @@ always @(posedge clk or posedge reset) begin
         audio_sample_wr <= 0;
         link_reg_wr <= 0;
         link_reg_rd <= 0;
+        fill_reg_wr <= 0;
 
         case (state)
 
@@ -621,6 +639,7 @@ always @(posedge clk or posedge reset) begin
                 reg_audio    <= ar_dec_audio;
                 reg_link     <= ar_dec_link;
                 reg_sram     <= ar_dec_sram;
+                reg_fill     <= ar_dec_fill;
 
                 // Route to appropriate state
                 if (ar_dec_ram)
@@ -655,6 +674,7 @@ always @(posedge clk or posedge reset) begin
                 reg_audio    <= aw_dec_audio;
                 reg_link     <= aw_dec_link;
                 reg_sram     <= aw_dec_sram;
+                reg_fill     <= aw_dec_fill;
 
                 // Also accept W if valid on same cycle
                 if (s_axi_wvalid) begin
@@ -686,6 +706,10 @@ always @(posedge clk or posedge reset) begin
                             link_reg_wr <= 1;
                             link_reg_addr <= aw_addr[6:2];
                             link_reg_wdata <= s_axi_wdata;
+                        end
+                        if (aw_dec_fill && |s_axi_wstrb) begin
+                            fill_reg_wr <= 1;
+                            fill_reg_wdata <= s_axi_wdata;
                         end
                     end
                 end else begin
@@ -821,6 +845,10 @@ always @(posedge clk or posedge reset) begin
                         link_reg_wr <= 1;
                         link_reg_addr <= req_addr[6:2];
                         link_reg_wdata <= s_axi_wdata;
+                    end
+                    if (reg_fill && |s_axi_wstrb) begin
+                        fill_reg_wr <= 1;
+                        fill_reg_wdata <= s_axi_wdata;
                     end
                 end
             end

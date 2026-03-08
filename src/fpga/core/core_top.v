@@ -556,6 +556,26 @@ assign cpu_sram_busy   = sram_ctrl_busy;
 assign cpu_sram_q      = sram_ctrl_q;
 assign cpu_sram_q_valid = sram_ctrl_q_valid;
 
+// SDRAM fill engine AXI4 master signals (to arbiter M2)
+wire        fill_m_awvalid, fill_m_awready;
+wire [31:0] fill_m_awaddr;
+wire [7:0]  fill_m_awlen;
+wire        fill_m_wvalid, fill_m_wready;
+wire [31:0] fill_m_wdata;
+wire [3:0]  fill_m_wstrb;
+wire        fill_m_wlast;
+wire        fill_m_bvalid;
+wire [1:0]  fill_m_bresp;
+wire        fill_m_arvalid;
+wire [31:0] fill_m_araddr;
+wire [7:0]  fill_m_arlen;
+
+// Fill engine register interface (from axi_periph_slave)
+wire        fill_reg_wr;
+wire [4:0]  fill_reg_addr;
+wire [31:0] fill_reg_wdata;
+wire [31:0] fill_reg_rdata;
+
 assign dbg_tx = 1'bZ;
 assign user1 = 1'bZ;
 assign aux_scl = 1'bZ;
@@ -1397,7 +1417,12 @@ assign video_hs = vidout_hs;
         .cpu_sram_wstrb(cpu_sram_wstrb),
         .cpu_sram_busy(cpu_sram_busy),
         .cpu_sram_q(cpu_sram_q),
-        .cpu_sram_q_valid(cpu_sram_q_valid)
+        .cpu_sram_q_valid(cpu_sram_q_valid),
+
+        .fill_reg_wr(fill_reg_wr),
+        .fill_reg_addr(fill_reg_addr),
+        .fill_reg_wdata(fill_reg_wdata),
+        .fill_reg_rdata(fill_reg_rdata)
     );
 
     // Slave → io_sdram pulse adapter: axi_sdram_slave holds rd/wr high until
@@ -1481,17 +1506,17 @@ assign video_hs = vidout_hs;
         .m1_wdata(bridge_m_wdata),     .m1_wstrb(bridge_m_wstrb),
         .m1_wlast(bridge_m_wlast),
         .m1_bvalid(bridge_m_bvalid),   .m1_bresp(bridge_m_bresp),
-        // M2: Unused (tie off)
-        .m2_arvalid(1'b0), .m2_arready(),
-        .m2_araddr(32'd0),   .m2_arlen(8'd0),
+        // M2: SDRAM Fill Engine
+        .m2_arvalid(fill_m_arvalid), .m2_arready(),
+        .m2_araddr(fill_m_araddr),   .m2_arlen(fill_m_arlen),
         .m2_rvalid(),   .m2_rdata(),
         .m2_rresp(),     .m2_rlast(),
-        .m2_awvalid(1'b0), .m2_awready(),
-        .m2_awaddr(32'd0),   .m2_awlen(8'd0),
-        .m2_wvalid(1'b0),   .m2_wready(),
-        .m2_wdata(32'd0),     .m2_wstrb(4'd0),
-        .m2_wlast(1'b0),
-        .m2_bvalid(),   .m2_bresp(),
+        .m2_awvalid(fill_m_awvalid), .m2_awready(fill_m_awready),
+        .m2_awaddr(fill_m_awaddr),   .m2_awlen(fill_m_awlen),
+        .m2_wvalid(fill_m_wvalid),   .m2_wready(fill_m_wready),
+        .m2_wdata(fill_m_wdata),     .m2_wstrb(fill_m_wstrb),
+        .m2_wlast(fill_m_wlast),
+        .m2_bvalid(fill_m_bvalid),   .m2_bresp(fill_m_bresp),
         // M3: Unused (tie off)
         .m3_arvalid(1'b0), .m3_arready(),
         .m3_araddr(32'd0),   .m3_arlen(8'd0),
@@ -1514,6 +1539,31 @@ assign video_hs = vidout_hs;
         .s_wdata(arb_s_wdata),     .s_wstrb(arb_s_wstrb),
         .s_wlast(arb_s_wlast),
         .s_bvalid(arb_s_bvalid),   .s_bresp(arb_s_bresp)
+    );
+
+    // SDRAM fill engine: DMA fill via AXI4 arbiter M2
+    sdram_fill_axi sdram_fill (
+        .clk(clk_cpu),
+        .reset_n(reset_n),
+        .reg_wr(fill_reg_wr),
+        .reg_addr(fill_reg_addr),
+        .reg_wdata(fill_reg_wdata),
+        .reg_rdata(fill_reg_rdata),
+        .m_awvalid(fill_m_awvalid),
+        .m_awready(fill_m_awready),
+        .m_awaddr(fill_m_awaddr),
+        .m_awlen(fill_m_awlen),
+        .m_wvalid(fill_m_wvalid),
+        .m_wready(fill_m_wready),
+        .m_wdata(fill_m_wdata),
+        .m_wstrb(fill_m_wstrb),
+        .m_wlast(fill_m_wlast),
+        .m_bvalid(fill_m_bvalid),
+        .m_bresp(fill_m_bresp),
+        .m_arvalid(fill_m_arvalid),
+        .m_araddr(fill_m_araddr),
+        .m_arlen(fill_m_arlen),
+        .active()
     );
 
     // AXI4 slave wrapper: arbiter output → SDRAM word-level → io_sdram (direct)

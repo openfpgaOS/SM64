@@ -666,7 +666,7 @@ static inline void gfx_soft_pick_draw_func(void);
         for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
         idx = scr_width * (scr_height - y - 1) + x; \
         while (x++ < x_end) { \
-            const int32_t uz_raw = p[2] + z_offset; \
+            const int32_t uz_raw = RV_Z_TO_ZBUF(p[2]) + z_offset; \
             uz = (uz_raw < 0) ? 0 : (uz_raw > 0xFFFF) ? 0xFFFF : (uint16_t)uz_raw; \
             if (!z_test || uz <= z_buffer[idx]) { \
                 w = RV_RCP(p[3]); \
@@ -718,7 +718,7 @@ static void rast_fast_texrgb_zwrite(const struct Tri tri) {
         for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
         idx = scr_width * (scr_height - y - 1) + x; \
         while (x++ < x_end) { \
-            const int32_t uz_raw = p[2] + z_offset; \
+            const int32_t uz_raw = RV_Z_TO_ZBUF(p[2]) + z_offset; \
             uz = (uz_raw < 0) ? 0 : (uz_raw > 0xFFFF) ? 0xFFFF : (uint16_t)uz_raw; \
             if (!z_test || uz <= z_buffer[idx]) { \
                 w = RV_RCP(p[3]); \
@@ -783,7 +783,7 @@ static void rast_fast_texrgba_edge_zwrite(const struct Tri tri) {
         for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
         idx = scr_width * (scr_height - y - 1) + x; \
         while (x++ < x_end) { \
-            const int32_t uz_raw = p[2] + z_offset; \
+            const int32_t uz_raw = RV_Z_TO_ZBUF(p[2]) + z_offset; \
             uz = (uz_raw < 0) ? 0 : (uz_raw > 0xFFFF) ? 0xFFFF : (uint16_t)uz_raw; \
             if (!z_test || uz <= z_buffer[idx]) { \
                 w = RV_RCP(p[3]); \
@@ -825,7 +825,7 @@ static void rast_fast_rgb_zwrite(const struct Tri tri) {
         for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
         idx = scr_width * (scr_height - y - 1) + x; \
         while (x++ < x_end) { \
-            const int32_t uz_raw = p[2] + z_offset; \
+            const int32_t uz_raw = RV_Z_TO_ZBUF(p[2]) + z_offset; \
             uz = (uz_raw < 0) ? 0 : (uz_raw > 0xFFFF) ? 0xFFFF : (uint16_t)uz_raw; \
             if (!z_test || uz <= z_buffer[idx]) { \
                 w = RV_RCP(p[3]); \
@@ -1004,6 +1004,24 @@ static struct ShaderProgram *gfx_soft_create_and_load_new_shader(uint32_t shader
 
     // pick rasterizer that interps the amount of float properties this shader requires
     prg->rast = rast_funcs[num_props];
+
+#ifdef TARGET_POCKET
+    // Specialized fast-path rasterizers: inline combine+sample+draw to eliminate
+    // ~36 cycles of per-pixel function-pointer overhead.
+    if (prg->draw_flags == 0) {
+        // Opaque (no blend)
+        if (prg->mix == SH_MT_TEXTURE_COLOR && !ccf.opt_fog && !ccf.opt_alpha && ccf.num_inputs == 1)
+            prg->rast = rast_fast_texrgb_zwrite;      // tex+rgb, 9 props
+        else if (prg->mix == SH_MT_TEXTURE && !ccf.opt_fog)
+            prg->rast = rast_fast_tex_zwrite;          // tex only, 6 props
+        else if (prg->mix == SH_MT_COLOR && !ccf.opt_fog && !ccf.opt_alpha)
+            prg->rast = rast_fast_rgb_zwrite;          // rgb only, 7 props
+    } else if (prg->draw_flags == DRAW_BLEND_EDGE) {
+        if (prg->mix == SH_MT_TEXTURE_COLOR && !ccf.opt_fog && ccf.opt_alpha
+            && ccf.num_inputs == 1 && prg->combine == combine_tex_rgba)
+            prg->rast = rast_fast_texrgba_edge_zwrite; // tex+rgba+edge, 10 props
+    }
+#endif
 
     gfx_soft_load_shader(prg);
 

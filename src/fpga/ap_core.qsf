@@ -748,6 +748,7 @@ set_global_assignment -name MIF_FILE core/firmware.mif
 set_global_assignment -name VERILOG_FILE core/cpu_system.v
 set_global_assignment -name VERILOG_FILE core/axi_periph_slave.v
 set_global_assignment -name VERILOG_FILE core/axi_sdram_slave.v
+set_global_assignment -name VERILOG_FILE core/sdram_fill_axi.v
 set_global_assignment -name VERILOG_FILE core/axi_psram_slave.v
 set_global_assignment -name VERILOG_FILE core/axi_sdram_arbiter.v
 set_global_assignment -name VERILOG_FILE core/axi_bridge_master.v
