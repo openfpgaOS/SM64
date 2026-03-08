@@ -2,8 +2,8 @@
  * wm_pocket.c -- Analogue Pocket window manager for SM64
  *
  * Implements GfxWindowManagerAPI for the Pocket hardware.
- * The software rasterizer outputs RGBA32 to gfx_output.
- * We convert RGBA32 -> RGB332 (8-bit) and write to a BRAM framebuffer (160x120).
+ * The software rasterizer renders at 320x240 RGBA32 into cached SDRAM.
+ * At swap time, we downsample 2:1 to 160x120 RGB332 and write to FB BRAM.
  * The FPGA video scanout reads BRAM with 2x pixel/line replication to 320x240,
  * then uses the hardware palette for RGB888 display.
  */
@@ -24,17 +24,11 @@ extern void term_printf(const char *fmt, ...);
 #define SYS_CYCLE_LO        (*(volatile uint32_t *)0x40000004)
 #define SYS_CYCLE_HI        (*(volatile uint32_t *)0x40000008)
 #define SYS_DISPLAY_MODE    (*(volatile uint32_t *)0x4000000C)
-#define SYS_FB_DISPLAY      (*(volatile uint32_t *)0x40000010)
-#define SYS_FB_DRAW         (*(volatile uint32_t *)0x40000014)
-#define SYS_FB_SWAP         (*(volatile uint32_t *)0x40000018)
 #define SYS_PAL_INDEX       (*(volatile uint32_t *)0x40000040)
 #define SYS_PAL_DATA        (*(volatile uint32_t *)0x40000044)
 
-/* Uncached SDRAM alias base (bypasses D-cache, visible to video DMA scanout) */
-#define SDRAM_UC_BASE 0x50000000
-
-#define SCREEN_WIDTH  320
-#define SCREEN_HEIGHT 240
+#define SCREEN_WIDTH  160
+#define SCREEN_HEIGHT 120
 
 /* Cycle counter for timing */
 static inline uint64_t get_cycles(void) {
@@ -62,28 +56,6 @@ static void setup_rgb332_palette(void) {
         uint32_t b8 = (b2 << 6) | (b2 << 4) | (b2 << 2) | b2;
 
         SYS_PAL_DATA = b8 | (g8 << 8) | (r8 << 16);
-    }
-}
-
-/* Convert RGBA32 framebuffer to RGB332 and write to uncached SDRAM draw buffer.
- * Hardware does 2x pixel/line replication in the FPGA video scanout.
- * Writes 4 pixels at a time as 32-bit words for efficiency (4,800 word writes).
- * Uses uncached SDRAM alias (0x50xxxxxx) so writes are immediately visible to
- * the video DMA scanout without requiring D-cache flush. */
-static void convert_rgba32_to_rgb332(void) {
-    /* Get current draw buffer (25-bit SDRAM 16-bit-word address) */
-    uint32_t draw_word_addr = SYS_FB_DRAW;
-    volatile uint32_t *dst = (volatile uint32_t *)(SDRAM_UC_BASE + (draw_word_addr << 1));
-    const uint32_t *src = gfx_output;
-    int total = SCREEN_WIDTH * SCREEN_HEIGHT;
-
-    for (int i = 0; i < total; i += 4) {
-        uint32_t r0 = src[i+0], r1 = src[i+1], r2 = src[i+2], r3 = src[i+3];
-        uint8_t c0 = (r0 & 0xE0) | ((r0 >> 11) & 0x1C) | ((r0 >> 22) & 0x03);
-        uint8_t c1 = (r1 & 0xE0) | ((r1 >> 11) & 0x1C) | ((r1 >> 22) & 0x03);
-        uint8_t c2 = (r2 & 0xE0) | ((r2 >> 11) & 0x1C) | ((r2 >> 22) & 0x03);
-        uint8_t c3 = (r3 & 0xE0) | ((r3 >> 11) & 0x1C) | ((r3 >> 22) & 0x03);
-        dst[i >> 2] = c0 | ((uint32_t)c1 << 8) | ((uint32_t)c2 << 16) | ((uint32_t)c3 << 24);
     }
 }
 
@@ -129,10 +101,31 @@ static bool gfx_pocket_start_frame(void) {
     return true;
 }
 
+/* FB BRAM base address (mapped via axi_periph_slave at 0x47) */
+#define FB_BRAM_BASE ((volatile uint32_t *)0x47000000)
+
+/* Convert 160x120 RGBA32 (cached SDRAM) to 160x120 RGB332 in FB BRAM.
+ * BRAM is dual-port: CPU writes port A, video scanout reads port B.
+ * Writes 4 packed RGB332 pixels per 32-bit word (4800 word writes). */
+static void convert_rgba32_to_fb_bram(void) {
+    volatile uint32_t *dst = FB_BRAM_BASE;
+    const uint32_t *src = gfx_output;
+    int total = SCREEN_WIDTH * SCREEN_HEIGHT;
+
+    for (int i = 0; i < total; i += 4) {
+        uint32_t r0 = src[i+0], r1 = src[i+1], r2 = src[i+2], r3 = src[i+3];
+        uint8_t c0 = (r0 & 0xE0) | ((r0 >> 11) & 0x1C) | ((r0 >> 22) & 0x03);
+        uint8_t c1 = (r1 & 0xE0) | ((r1 >> 11) & 0x1C) | ((r1 >> 22) & 0x03);
+        uint8_t c2 = (r2 & 0xE0) | ((r2 >> 11) & 0x1C) | ((r2 >> 22) & 0x03);
+        uint8_t c3 = (r3 & 0xE0) | ((r3 >> 11) & 0x1C) | ((r3 >> 22) & 0x03);
+        dst[i >> 2] = c0 | ((uint32_t)c1 << 8) | ((uint32_t)c2 << 16) | ((uint32_t)c3 << 24);
+    }
+}
+
 static void gfx_pocket_swap_buffers_begin(void) {
-    /* Convert the software rasterizer output to the SDRAM draw buffer */
+    /* Convert RGBA32 from cached SDRAM to RGB332 in FB BRAM */
     if (gfx_output != NULL) {
-        convert_rgba32_to_rgb332();
+        convert_rgba32_to_fb_bram();
     }
 
     /* Switch to FB mode on first frame */
@@ -140,15 +133,11 @@ static void gfx_pocket_swap_buffers_begin(void) {
         fb_mode_active = true;
         SYS_DISPLAY_MODE = 1;
     }
-
-    /* Request buffer flip (happens on next vblank) */
-    SYS_FB_SWAP = 1;
 }
 
 static void gfx_pocket_swap_buffers_end(void) {
-    /* Wait for vsync */
-    while (SYS_FB_SWAP)
-        ;
+    /* Single-buffered FB BRAM — no swap needed.
+     * Video scanout reads port B concurrently (dual-port BRAM). */
 }
 
 static double gfx_pocket_get_time(void) {

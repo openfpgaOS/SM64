@@ -168,6 +168,20 @@ static inline fx32 fx32_rcp_nr(fx32 b) {
     return fx32_mul(y0, FX32_FROM_INT(2) - by0);    // y0*(2 - b*y0)
 }
 
+// Safe reciprocal: NR with overflow guard.
+// When |b| is tiny, the NR step can push the hardware-saturated RCP past
+// INT32_MAX, flipping the sign. Detect via XOR and fall back to the
+// hardware-saturated result (correct sign, ~16 bits precision).
+static inline fx32 fx32_rcp_safe(fx32 b) {
+    fx32 y0 = fx32_rcp(b);                         // correctly saturated by HW
+    fx32 by0 = fx32_mul(b, y0);
+    fx32 y1 = fx32_mul(y0, FX32_FROM_INT(2) - by0);
+    // If NR flipped the sign, overflow occurred — use HW result
+    if (__builtin_expect((y0 ^ y1) < 0, 0))
+        return y0;
+    return y1;
+}
+
 // Fast a/b: refined rcp + multiply. Full Q16.16 precision, ~12 cycles.
 static inline fx32 fx32_div_fast(fx32 a, fx32 b) {
     return fx32_mul(a, fx32_rcp_nr(b));

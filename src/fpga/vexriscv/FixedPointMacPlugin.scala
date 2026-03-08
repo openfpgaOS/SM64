@@ -435,7 +435,9 @@ class FixedPointMacPlugin(val layer: LaneLayer,
         val satNeg = S(-0x7FFFFFFFL, 32 bits)  // 0x80000001 = Int.MinValue + 1
         val satPos = S(0x7FFFFFFFL, 32 bits)
         val signedResult = SInt(32 bits)
-        when(zero || overflow) {
+        // Saturate on: div-by-zero, unsigned overflow (>32 bits),
+        // OR signed overflow (quotient bit 31 set = doesn't fit in int31).
+        when(zero || overflow || quotient.msb) {
           signedResult := Mux(sign, satNeg, satPos)
         } otherwise {
           signedResult := Mux(sign, -quotient.asSInt, quotient.asSInt)

@@ -18,7 +18,28 @@
 #include "gfx_cc.h"
 #include "macros.h"
 
+#ifdef TARGET_POCKET
+#include "pocket/span_rasterizer.h"
+#endif
 
+
+#ifdef TARGET_POCKET
+/* Q16.16 fixed-point rasterizer using hardware FXMUL/FXRCP/FXDIV */
+#include "pocket/fx32.h"
+typedef fx32 rv_t;
+#define RV_ONE       FX32_ONE
+#define RV_HALF      FX32_HALF
+#define RV_ZERO      0
+#define RV_MUL(a,b)  fx32_mul((a),(b))
+#define RV_RCP(a)    fx32_rcp_safe((a))
+#define RV_DIV(a,b)  fx32_div((a),(b))
+#define RV_TO_INT(a) FX32_TO_INT((a))
+#define RV_FROM_INT(a) FX32_FROM_INT((a))
+#define RV_FROM_FLOAT(f) FX32_FROM_FLOAT((f))
+#define RV_LITERAL(f) ((fx32)((f) * 65536.0f))
+#define RV_Z_TO_ZBUF(v) ((int)(((int64_t)(v) * 65535) >> 16))
+#define RV_REJECT_THIN(cross) if ((cross) > -0x2000 && (cross) < 0x2000) return
+#else
 typedef float rv_t;
 #define RV_ONE       1.0f
 #define RV_HALF      0.5f
@@ -31,6 +52,8 @@ typedef float rv_t;
 #define RV_FROM_FLOAT(f) (f)
 #define RV_LITERAL(f) (f)
 #define RV_Z_TO_ZBUF(v) ((int)((v) * 65535.f))
+#define RV_REJECT_THIN(cross) ((void)0)
+#endif
 
 #define ALIGN(x, a) (((x) + (a - 1)) & ~(a - 1))
 
@@ -560,7 +583,6 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
     const rv_t dxdy_ab = rv_div_sat(ab.x, ab.y); /* x increment along ab */ \
     const rv_t dxdy_ac = rv_div_sat(ac.x, ac.y); /* x increment along ac */ \
     const rv_t dxdy_bc = rv_div_sat(bc.x, bc.y); /* x increment along bc */ \
-    const bool side = dxdy_ac > dxdy_ab; /* which side the longer edge (AC) is on */ \
     const rv_t y_pre0 = RV_ONE - (v0[1] - RV_FROM_INT(y0i)); /* subpixel pre-step */ \
     rv_t dpdy_a[nprops]; /* vertex prop increments along left edge */ \
     rv_t p_a[nprops]; /* vertex leftmost points */ \
@@ -568,6 +590,11 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
     rv_t dp_x[nprops]; /* X increments for vertex props */ \
     rv_t dp_y[nprops]; /* Y increments for vertex props */ \
     register int i; \
+    /* use cross product sign for side — robust in fixed-point (avoids division rounding) */ \
+    const rv_t _tri_cross = RV_MUL(ac.x, ab.y) - RV_MUL(ab.x, ac.y); \
+    /* Reject near-degenerate triangles: gradient overflow in Q16.16 when |cross| is tiny */ \
+    RV_REJECT_THIN(_tri_cross); \
+    const bool side = _tri_cross > 0; \
     /* compute property derivatives */ \
     R_COMPUTE_DENOM_AND_DP(dp_x, dp_y, v0, v1, v2, ab, ac, nprops); \
     if (!side) { \
@@ -872,10 +899,38 @@ DEFINE_RAST_FUNC(12)
 DEFINE_RAST_FUNC(13)
 DEFINE_RAST_FUNC(14)
 
+#ifdef TARGET_POCKET
+/* Convert float vertex buffer to fx32 with affine de-premultiplication.
+ * GFX_W_PREMULT stores properties as prop/w — tiny values for far objects
+ * that lose precision in Q16.16. Undo premult in float (precise), store
+ * raw property values, and set 1/w = 1.0 so per-pixel RV_RCP is a no-op.
+ * Result: affine interpolation (N64-authentic, no precision loss). */
+static inline void pop_triangle(float *buf_f, const int stride) {
+    rv_t buf_fx[stride * 3];
+    for (int v = 0; v < 3; v++) {
+        float *src = buf_f + v * stride;
+        rv_t *dst = buf_fx + v * stride;
+        /* x/w, y/w (NDC) — keep for viewport_transform */
+        dst[0] = FX32_FROM_FLOAT(src[0]);
+        dst[1] = FX32_FROM_FLOAT(src[1]);
+        /* z_ndc — keep as-is (already final depth value) */
+        dst[2] = FX32_FROM_FLOAT(src[2]);
+        /* Set 1/w = 1.0: per-pixel RV_RCP(1.0)=1.0, mul by 1 = no-op */
+        dst[3] = FX32_ONE;
+        /* Undo premultiplication: prop/w * w = prop (in float for precision) */
+        float w = 1.0f / src[3]; /* src[3] = 1/w */
+        for (int i = 4; i < stride; i++)
+            dst[i] = FX32_FROM_FLOAT(src[i] * w);
+    }
+    Vector4 *v0 = (Vector4 *)buf_fx;
+    Vector4 *v1 = (Vector4 *)(buf_fx + stride);
+    Vector4 *v2 = (Vector4 *)(buf_fx + (stride << 1));
+#else
 static inline void pop_triangle(rv_t *buf, const int stride) {
     Vector4 *v0 = (Vector4 *)buf;
     Vector4 *v1 = (Vector4 *)(buf + stride);
     Vector4 *v2 = (Vector4 *)(buf + (stride << 1));
+#endif
     Vector4 *vt;
 
     // the vertices come to us in clip space, but already divided by w, still gotta transform
@@ -1009,13 +1064,13 @@ static struct ShaderProgram *gfx_soft_create_and_load_new_shader(uint32_t shader
     // Specialized fast-path rasterizers: inline combine+sample+draw to eliminate
     // ~36 cycles of per-pixel function-pointer overhead.
     if (prg->draw_flags == 0) {
-        // Opaque (no blend)
+        // HW span rasterizer disabled — use SW fast-path rasterizers only
         if (prg->mix == SH_MT_TEXTURE_COLOR && !ccf.opt_fog && !ccf.opt_alpha && ccf.num_inputs == 1)
-            prg->rast = rast_fast_texrgb_zwrite;      // tex+rgb, 9 props
+            prg->rast = rast_fast_texrgb_zwrite;       // SW tex+rgb, 9 props
         else if (prg->mix == SH_MT_TEXTURE && !ccf.opt_fog)
-            prg->rast = rast_fast_tex_zwrite;          // tex only, 6 props
+            prg->rast = rast_fast_tex_zwrite;          // SW tex only, 6 props
         else if (prg->mix == SH_MT_COLOR && !ccf.opt_fog && !ccf.opt_alpha)
-            prg->rast = rast_fast_rgb_zwrite;          // rgb only, 7 props
+            prg->rast = rast_fast_rgb_zwrite;          // SW rgb only, 7 props
     } else if (prg->draw_flags == DRAW_BLEND_EDGE) {
         if (prg->mix == SH_MT_TEXTURE_COLOR && !ccf.opt_fog && ccf.opt_alpha
             && ccf.num_inputs == 1 && prg->combine == combine_tex_rgba)
@@ -1251,12 +1306,12 @@ static void gfx_soft_prepare_tables(void) {
 }
 
 static void gfx_soft_set_resolution(const int width, const int height) {
-    if (z_buffer) free(z_buffer);
-    if (gfx_output) free(gfx_output);
-
     scr_width = width;
     scr_height = height;
     scr_size = scr_width * scr_height;
+
+    if (z_buffer) free(z_buffer);
+    if (gfx_output) free(gfx_output);
 
     z_buffer = calloc(scr_width * scr_height, sizeof(int16_t));
     if (!z_buffer) {
@@ -1341,4 +1396,4 @@ struct GfxRenderingAPI gfx_soft_api = {
     gfx_soft_shutdown,
 };
 
-#endif // ENABLE_OPENGL_LEGACY
+#endif // ENABLE_SOFTRAST
