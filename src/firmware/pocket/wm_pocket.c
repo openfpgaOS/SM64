@@ -17,6 +17,7 @@
 #include "macros.h"
 #include "gfx/gfx_window_manager_api.h"
 #include "gfx/gfx_soft.h"
+#include "pocket/span_rasterizer.h"
 extern void term_printf(const char *fmt, ...);
 
 /* System register MMIO */
@@ -24,6 +25,7 @@ extern void term_printf(const char *fmt, ...);
 #define SYS_CYCLE_LO        (*(volatile uint32_t *)0x40000004)
 #define SYS_CYCLE_HI        (*(volatile uint32_t *)0x40000008)
 #define SYS_DISPLAY_MODE    (*(volatile uint32_t *)0x4000000C)
+#define SYS_FB_PAGE_FLIP    (*(volatile uint32_t *)0x4000001C)
 #define SYS_PAL_INDEX       (*(volatile uint32_t *)0x40000040)
 #define SYS_PAL_DATA        (*(volatile uint32_t *)0x40000044)
 
@@ -102,42 +104,46 @@ static bool gfx_pocket_start_frame(void) {
 }
 
 /* FB BRAM base address (mapped via axi_periph_slave at 0x47) */
-#define FB_BRAM_BASE ((volatile uint32_t *)0x47000000)
+#define FB_BRAM_W ((volatile uint32_t *)0x47000000)
 
-/* Convert 160x120 RGBA32 (cached SDRAM) to 160x120 RGB332 in FB BRAM.
- * BRAM is dual-port: CPU writes port A, video scanout reads port B.
- * Writes 4 packed RGB332 pixels per 32-bit word (4800 word writes). */
-static void convert_rgba32_to_fb_bram(void) {
-    volatile uint32_t *dst = FB_BRAM_BASE;
-    const uint32_t *src = gfx_output;
-    int total = SCREEN_WIDTH * SCREEN_HEIGHT;
+/* ZB BRAM for diagnostics */
+#define ZB_BRAM_R ((volatile uint32_t *)0x46000000)
 
-    for (int i = 0; i < total; i += 4) {
-        uint32_t r0 = src[i+0], r1 = src[i+1], r2 = src[i+2], r3 = src[i+3];
-        uint8_t c0 = (r0 & 0xE0) | ((r0 >> 11) & 0x1C) | ((r0 >> 22) & 0x03);
-        uint8_t c1 = (r1 & 0xE0) | ((r1 >> 11) & 0x1C) | ((r1 >> 22) & 0x03);
-        uint8_t c2 = (r2 & 0xE0) | ((r2 >> 11) & 0x1C) | ((r2 >> 22) & 0x03);
-        uint8_t c3 = (r3 & 0xE0) | ((r3 >> 11) & 0x1C) | ((r3 >> 22) & 0x03);
-        dst[i >> 2] = c0 | ((uint32_t)c1 << 8) | ((uint32_t)c2 << 16) | ((uint32_t)c3 << 24);
-    }
-}
+/* All pixels (HW and SW) are already in FB BRAM. Just drain and flip. */
+
+int diag_frame = 0;
 
 static void gfx_pocket_swap_buffers_begin(void) {
-    /* Convert RGBA32 from cached SDRAM to RGB332 in FB BRAM */
-    if (gfx_output != NULL) {
-        convert_rgba32_to_fb_bram();
+    /* Drain HW span FIFO to ensure all HW pixels are written */
+    span_drain();
+
+    /* Diagnostic: z-test pass/reject counters + z-buffer sampling */
+    extern int batch_log_idx;
+    batch_log_idx = 0;  /* Reset batch log for next frame */
+    if (diag_frame < 10) {
+        uint32_t zp = SPAN_ZTEST_PASS;
+        uint32_t zr = SPAN_ZTEST_REJECT;
+        /* Sample z-buffer at y=60, x=80 (center) */
+        int idx = 160 * 59 + 80;
+        int word = idx >> 1;
+        uint32_t w = ZB_BRAM_R[word];
+        uint16_t z = (idx & 1) ? (w >> 16) : (w & 0xFFFF);
+        term_printf("F%d: pass=%u rej=%u z80=%04x\n",
+                    diag_frame, zp, zr, z);
+        diag_frame++;
     }
 
-    /* Switch to FB mode on first frame */
-    if (!fb_mode_active) {
+    /* Flip: toggle draw page. Video scanout reads the opposite page. */
+    SYS_FB_PAGE_FLIP = 1;
+
+    /* Switch to FB mode — delay to frame 15 so terminal diagnostics are visible */
+    if (!fb_mode_active && diag_frame >= 15) {
         fb_mode_active = true;
         SYS_DISPLAY_MODE = 1;
     }
 }
 
 static void gfx_pocket_swap_buffers_end(void) {
-    /* Single-buffered FB BRAM — no swap needed.
-     * Video scanout reads port B concurrently (dual-port BRAM). */
 }
 
 static double gfx_pocket_get_time(void) {

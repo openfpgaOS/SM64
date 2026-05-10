@@ -79,6 +79,7 @@ module axi_periph_slave (
     // Display control outputs
     output wire        display_mode,
     output wire [24:0] fb_display_addr,
+    output wire        fb_draw_page,
 
     // Palette write interface
     output reg         pal_wr,
@@ -109,21 +110,25 @@ module axi_periph_slave (
     output reg  [31:0] link_reg_wdata,
     input wire  [31:0] link_reg_rdata,
 
-    // SRAM word interface (for CPU z-buffer access)
-    output reg         cpu_sram_rd,
-    output reg         cpu_sram_wr,
-    output reg  [21:0] cpu_sram_addr,
-    output reg  [31:0] cpu_sram_wdata,
-    output reg  [3:0]  cpu_sram_wstrb,
-    input wire         cpu_sram_busy,
-    input wire  [31:0] cpu_sram_q,
-    input wire         cpu_sram_q_valid,
+    // Z-buffer BRAM interface (port A in core_top.v)
+    output reg  [13:0] zb_bram_addr,
+    output reg  [31:0] zb_bram_wdata,
+    output reg  [3:0]  zb_bram_wstrb,
+    input wire  [31:0] zb_bram_rdata,
+    output reg         zb_bram_wren,
 
-    // SDRAM fill engine register interface
-    output reg         fill_reg_wr,
-    output wire [4:0]  fill_reg_addr,
-    output reg  [31:0] fill_reg_wdata,
-    input wire  [31:0] fill_reg_rdata
+    // Framebuffer BRAM interface (port A mux in core_top.v)
+    output reg  [12:0] fb_bram_addr,
+    output reg  [31:0] fb_bram_wdata,
+    output reg  [3:0]  fb_bram_wstrb,
+    input wire  [31:0] fb_bram_rdata,
+    output reg         fb_bram_wren,
+
+    // Span rasterizer register interface
+    output reg         span_reg_wr,
+    output wire [12:0] span_reg_addr,
+    output reg  [31:0] span_reg_wdata,
+    input wire  [31:0] span_reg_rdata
 );
 
 wire reset = ~reset_n;
@@ -195,6 +200,7 @@ assign term_mem_wstrb = is_write ? req_wstrb : 4'b0;
 reg [31:0] sysreg_rdata;
 reg [63:0] cycle_counter;
 reg display_mode_reg;
+reg fb_draw_page_reg;  // 0 or 1: which FB BRAM page CPU/span render to
 
 reg [15:0] ds_slot_id_reg;
 reg [31:0] ds_slot_offset_reg;
@@ -240,6 +246,7 @@ endfunction
 
 assign display_mode = display_mode_reg;
 assign fb_display_addr = fb_display_addr_reg;
+assign fb_draw_page = fb_draw_page_reg;
 
 // ============================================
 // CDC synchronizers
@@ -325,6 +332,7 @@ always @(posedge clk) begin
     if (reset) begin
         cycle_counter <= 0;
         display_mode_reg <= 0;
+        fb_draw_page_reg <= 0;
         fb_display_idx <= 2'd0;
         fb_ready_idx <= 2'd3;  // 3 = none ready
         fb_draw_idx <= 2'd1;
@@ -361,6 +369,7 @@ always @(posedge clk) begin
         if (sysreg_wr_fire) begin
             case (req_addr[7:2])
                 6'b000011: display_mode_reg <= req_wdata[0];
+                6'b000111: fb_draw_page_reg <= ~fb_draw_page_reg;  // Toggle draw page
                 6'b000110: if (req_wdata[0]) begin
                     // Draw buffer complete → ready; assign free buffer as new draw
                     fb_ready_idx <= fb_draw_idx;
@@ -418,6 +427,7 @@ always @(*) begin
         6'b000010: sysreg_rdata = cycle_counter[63:32];
         6'b000011: sysreg_rdata = {31'b0, display_mode_reg};
         6'b000100: sysreg_rdata = {7'b0, fb_display_addr_reg};
+        6'b000111: sysreg_rdata = {31'b0, fb_draw_page_reg};
         6'b000101: sysreg_rdata = {7'b0, fb_draw_addr_reg};
         6'b000110: sysreg_rdata = 32'h0;  // triple buffer: never blocks
         6'b001000: sysreg_rdata = {16'b0, ds_slot_id_reg};
@@ -459,13 +469,13 @@ end
 // ============================================
 // Peripheral read data mux (combinatorial)
 // ============================================
-// Fill engine register address: combinatorial so reads always see the correct register
-assign fill_reg_addr = req_addr[6:2];
+// Span rasterizer register address: combinatorial so reads always see the correct register
+assign span_reg_addr = req_addr[12:0];
 
 wire [31:0] periph_rd_mux = reg_sysreg   ? sysreg_rdata :
                              reg_audio    ? {19'b0, audio_fifo_full, audio_fifo_level} :
                              reg_link     ? link_reg_rdata :
-                             reg_fill     ? fill_reg_rdata :
+                             reg_span     ? span_reg_rdata :
                              32'h0;
 
 // ============================================
@@ -478,7 +488,7 @@ localparam S_PERIPH_WR = 3'd3;
 localparam S_TERM      = 3'd4;
 localparam S_WR_NEXT   = 3'd5;
 localparam S_BRAM_WR   = 3'd6;
-localparam S_SRAM_WAIT = 3'd7;
+localparam S_BRAM_EXT  = 3'd7;  // Wait for external BRAM read (ZB/FB)
 
 reg [2:0] state;
 
@@ -496,14 +506,15 @@ reg reg_term;
 reg reg_sysreg;
 reg reg_audio;
 reg reg_link;
-reg reg_sram;
-reg reg_fill;
+reg reg_zb;     // Z-buffer BRAM (0x46)
+reg reg_fb;     // Framebuffer BRAM (0x47)
+reg reg_span;
 
 // Whether this beat is the last of a burst
 wire beat_is_last = (burst_count == burst_len);
 
-// SRAM access tracking
-reg sram_accepted;
+// External BRAM read tracking (1-cycle latency)
+reg bram_ext_waited;
 
 // Terminal pending flag
 wire term_pending = (state == S_TERM);
@@ -546,16 +557,18 @@ wire ar_dec_term   = (ar_addr[31:13] == 19'h10000);
 wire ar_dec_sysreg = (ar_addr[31:8]  == 24'h400000);
 wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
 wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
-wire ar_dec_sram   = (ar_addr[31:24] == 8'h38);
-wire ar_dec_fill   = (ar_addr[31:24] == 8'h44);
+wire ar_dec_zb     = (ar_addr[31:24] == 8'h46);
+wire ar_dec_fb     = (ar_addr[31:24] == 8'h47);
+wire ar_dec_span   = (ar_addr[31:24] == 8'h45);
 
 wire aw_dec_ram    = (aw_addr[31:16] == 16'b0);
 wire aw_dec_term   = (aw_addr[31:13] == 19'h10000);
 wire aw_dec_sysreg = (aw_addr[31:8]  == 24'h400000);
 wire aw_dec_audio  = (aw_addr[31:24] == 8'h4C);
 wire aw_dec_link   = (aw_addr[31:24] == 8'h4D);
-wire aw_dec_sram   = (aw_addr[31:24] == 8'h38);
-wire aw_dec_fill   = (aw_addr[31:24] == 8'h44);
+wire aw_dec_zb     = (aw_addr[31:24] == 8'h46);
+wire aw_dec_fb     = (aw_addr[31:24] == 8'h47);
+wire aw_dec_span   = (aw_addr[31:24] == 8'h45);
 
 // ============================================
 // Main FSM
@@ -585,18 +598,22 @@ always @(posedge clk or posedge reset) begin
         reg_sysreg <= 0;
         reg_audio <= 0;
         reg_link <= 0;
-        reg_sram <= 0;
-        reg_fill <= 0;
-        sram_accepted <= 0;
+        reg_zb <= 0;
+        reg_fb <= 0;
+        reg_span <= 0;
+        bram_ext_waited <= 0;
 
-        fill_reg_wr <= 0;
-        fill_reg_wdata <= 0;
+        span_reg_wr <= 0;
+        span_reg_wdata <= 0;
 
-        cpu_sram_rd <= 0;
-        cpu_sram_wr <= 0;
-        cpu_sram_addr <= 0;
-        cpu_sram_wdata <= 0;
-        cpu_sram_wstrb <= 0;
+        zb_bram_addr <= 0;
+        zb_bram_wdata <= 0;
+        zb_bram_wstrb <= 0;
+        zb_bram_wren <= 0;
+        fb_bram_addr <= 0;
+        fb_bram_wdata <= 0;
+        fb_bram_wstrb <= 0;
+        fb_bram_wren <= 0;
 
         sysreg_wr_fire <= 0;
         audio_sample_wr <= 0;
@@ -616,7 +633,9 @@ always @(posedge clk or posedge reset) begin
         audio_sample_wr <= 0;
         link_reg_wr <= 0;
         link_reg_rd <= 0;
-        fill_reg_wr <= 0;
+        span_reg_wr <= 0;
+        zb_bram_wren <= 0;
+        fb_bram_wren <= 0;
 
         case (state)
 
@@ -638,19 +657,23 @@ always @(posedge clk or posedge reset) begin
                 reg_sysreg   <= ar_dec_sysreg;
                 reg_audio    <= ar_dec_audio;
                 reg_link     <= ar_dec_link;
-                reg_sram     <= ar_dec_sram;
-                reg_fill     <= ar_dec_fill;
+                reg_zb       <= ar_dec_zb;
+                reg_fb       <= ar_dec_fb;
+                reg_span     <= ar_dec_span;
 
                 // Route to appropriate state
                 if (ar_dec_ram)
                     state <= S_BRAM_RD;
                 else if (ar_dec_term)
                     state <= S_TERM;
-                else if (ar_dec_sram) begin
-                    cpu_sram_rd <= 1;
-                    cpu_sram_addr <= ar_addr[23:2];
-                    sram_accepted <= 0;
-                    state <= S_SRAM_WAIT;
+                else if (ar_dec_zb) begin
+                    zb_bram_addr <= ar_addr[15:2];
+                    bram_ext_waited <= 0;
+                    state <= S_BRAM_EXT;
+                end else if (ar_dec_fb) begin
+                    fb_bram_addr <= ar_addr[14:2];
+                    bram_ext_waited <= 0;
+                    state <= S_BRAM_EXT;
                 end else begin
                     state <= S_PERIPH_RD;
                     if (ar_dec_link) begin
@@ -673,8 +696,9 @@ always @(posedge clk or posedge reset) begin
                 reg_sysreg   <= aw_dec_sysreg;
                 reg_audio    <= aw_dec_audio;
                 reg_link     <= aw_dec_link;
-                reg_sram     <= aw_dec_sram;
-                reg_fill     <= aw_dec_fill;
+                reg_zb       <= aw_dec_zb;
+                reg_fb       <= aw_dec_fb;
+                reg_span     <= aw_dec_span;
 
                 // Also accept W if valid on same cycle
                 if (s_axi_wvalid) begin
@@ -686,13 +710,18 @@ always @(posedge clk or posedge reset) begin
                         state <= S_BRAM_WR;
                     else if (aw_dec_term)
                         state <= S_TERM;
-                    else if (aw_dec_sram) begin
-                        cpu_sram_wr <= 1;
-                        cpu_sram_addr <= aw_addr[23:2];
-                        cpu_sram_wdata <= s_axi_wdata;
-                        cpu_sram_wstrb <= s_axi_wstrb;
-                        sram_accepted <= 0;
-                        state <= S_SRAM_WAIT;
+                    else if (aw_dec_zb) begin
+                        zb_bram_addr <= aw_addr[15:2];
+                        zb_bram_wdata <= s_axi_wdata;
+                        zb_bram_wstrb <= s_axi_wstrb;
+                        zb_bram_wren <= 1;
+                        state <= S_PERIPH_WR;
+                    end else if (aw_dec_fb) begin
+                        fb_bram_addr <= aw_addr[14:2];
+                        fb_bram_wdata <= s_axi_wdata;
+                        fb_bram_wstrb <= s_axi_wstrb;
+                        fb_bram_wren <= 1;
+                        state <= S_PERIPH_WR;
                     end else begin
                         // Peripheral write: fire write pulses immediately
                         state <= S_PERIPH_WR;
@@ -707,9 +736,9 @@ always @(posedge clk or posedge reset) begin
                             link_reg_addr <= aw_addr[6:2];
                             link_reg_wdata <= s_axi_wdata;
                         end
-                        if (aw_dec_fill && |s_axi_wstrb) begin
-                            fill_reg_wr <= 1;
-                            fill_reg_wdata <= s_axi_wdata;
+                        if (aw_dec_span && |s_axi_wstrb) begin
+                            span_reg_wr <= 1;
+                            span_reg_wdata <= s_axi_wdata;
                         end
                     end
                 end else begin
@@ -825,13 +854,18 @@ always @(posedge clk or posedge reset) begin
                     state <= S_BRAM_WR;
                 end else if (reg_term) begin
                     state <= S_TERM;
-                end else if (reg_sram) begin
-                    cpu_sram_wr <= 1;
-                    cpu_sram_addr <= req_addr[23:2];
-                    cpu_sram_wdata <= s_axi_wdata;
-                    cpu_sram_wstrb <= s_axi_wstrb;
-                    sram_accepted <= 0;
-                    state <= S_SRAM_WAIT;
+                end else if (reg_zb) begin
+                    zb_bram_addr <= req_addr[15:2];
+                    zb_bram_wdata <= s_axi_wdata;
+                    zb_bram_wstrb <= s_axi_wstrb;
+                    zb_bram_wren <= 1;
+                    state <= S_PERIPH_WR;
+                end else if (reg_fb) begin
+                    fb_bram_addr <= req_addr[14:2];
+                    fb_bram_wdata <= s_axi_wdata;
+                    fb_bram_wstrb <= s_axi_wstrb;
+                    fb_bram_wren <= 1;
+                    state <= S_PERIPH_WR;
                 end else begin
                     // Peripheral write beat
                     state <= S_PERIPH_WR;
@@ -846,44 +880,30 @@ always @(posedge clk or posedge reset) begin
                         link_reg_addr <= req_addr[6:2];
                         link_reg_wdata <= s_axi_wdata;
                     end
-                    if (reg_fill && |s_axi_wstrb) begin
-                        fill_reg_wr <= 1;
-                        fill_reg_wdata <= s_axi_wdata;
+                    if (reg_span && |s_axi_wstrb) begin
+                        span_reg_wr <= 1;
+                        span_reg_wdata <= s_axi_wdata;
                     end
                 end
             end
         end
 
         // ============================================
-        // SRAM_WAIT: Wait for SRAM controller to complete
+        // BRAM_EXT: Wait for external BRAM read (1 cycle latency)
+        // Address was set on entry; BRAM latches it on posedge entering
+        // this state. We wait one extra cycle for the read data.
         // ============================================
-        S_SRAM_WAIT: begin
-            if (!is_write) begin
-                // Read: wait for acceptance, then q_valid
-                if (!sram_accepted) begin
-                    if (!cpu_sram_busy) begin
-                        sram_accepted <= 1;
-                        cpu_sram_rd <= 0;
-                    end
-                end else if (cpu_sram_q_valid) begin
-                    s_axi_rvalid <= 1;
-                    s_axi_rdata <= cpu_sram_q;
-                    s_axi_rresp <= 2'b00;
-                    s_axi_rlast <= 1;
-                    state <= S_IDLE;
-                end
+        S_BRAM_EXT: begin
+            if (!bram_ext_waited) begin
+                // Cycle 0: BRAM is latching address, data not ready yet
+                bram_ext_waited <= 1;
             end else begin
-                // Write: wait for acceptance, then !busy
-                if (!sram_accepted) begin
-                    if (!cpu_sram_busy) begin
-                        sram_accepted <= 1;
-                        cpu_sram_wr <= 0;
-                    end
-                end else if (!cpu_sram_busy) begin
-                    s_axi_bvalid <= 1;
-                    s_axi_bresp <= 2'b00;
-                    state <= S_IDLE;
-                end
+                // Cycle 1: data is valid
+                s_axi_rvalid <= 1;
+                s_axi_rdata <= reg_zb ? zb_bram_rdata : fb_bram_rdata;
+                s_axi_rresp <= 2'b00;
+                s_axi_rlast <= 1;
+                state <= S_IDLE;
             end
         end
 

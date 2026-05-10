@@ -55,6 +55,68 @@ typedef float rv_t;
 #define RV_REJECT_THIN(cross) ((void)0)
 #endif
 
+#ifdef TARGET_POCKET
+/* ZB BRAM: 9600 x 32-bit words = 19200 x 16-bit z-values at 0x46000000
+ * FB BRAM: 9600 x 32-bit words = 19200 x 8-bit RGB332 pixels at 0x47000000 (double-buffered)
+ *
+ * fb_cache: cached RGB332 shadow buffer in SDRAM (19200 bytes) for CPU rendering.
+ * HW span rasterizer writes directly to FB BRAM via FIFO commands.
+ * fb_dirty: word-level dirty bitmap (4800 bits = 150 words) tracking CPU-written pixels.
+ * At swap: selectively copy only dirty fb_cache words to FB BRAM, then flip. */
+#define FB_BRAM   ((volatile uint8_t *)0x47000000)
+#define FB_BRAM_W ((volatile uint32_t *)0x47000000)
+#define ZB_BRAM_W ((volatile uint32_t *)0x46000000)
+uint8_t *fb_cache;  /* Cached RGB332 framebuffer in SDRAM */
+uint32_t fb_dirty[150];  /* 4800 bits: 1 per 4-pixel FB BRAM word */
+
+/* Mark a pixel's word as CPU-dirty */
+static inline void fb_dirty_mark(int idx) {
+    int word = idx >> 2;  /* 4 pixels per FB BRAM word */
+    fb_dirty[word >> 5] |= 1u << (word & 31);
+}
+
+/* Flush dirty fb_cache words to FB BRAM so blend reads see SW-rendered pixels.
+ * Call after span_drain() and before any blend rendering. */
+static inline void fb_flush_dirty(void) {
+    const uint32_t *src = (const uint32_t *)fb_cache;
+    for (int i = 0; i < 150; i++) {
+        uint32_t bits = fb_dirty[i];
+        while (bits) {
+            int bit = __builtin_ctz(bits);
+            int word_idx = (i << 5) | bit;
+            FB_BRAM_W[word_idx] = src[word_idx];
+            bits &= bits - 1;
+        }
+    }
+}
+
+static inline uint8_t rgba_to_332(uint8_t r, uint8_t g, uint8_t b) {
+    return (r & 0xE0) | ((g >> 3) & 0x1C) | (b >> 6);
+}
+
+static inline int ilog2(int v) {
+    int r = 0;
+    while (v > 1) { v >>= 1; r++; }
+    return r;
+}
+
+/* RGB332 → RGBA32 lookup table (1 KB, populated at init) */
+static uint32_t rgb332_lut[256];
+
+static void init_rgb332_lut(void) {
+    for (int i = 0; i < 256; i++) {
+        uint32_t r3 = (i >> 5) & 7;
+        uint32_t g3 = (i >> 2) & 7;
+        uint32_t b2 = i & 3;
+        uint32_t r8 = (r3 << 5) | (r3 << 2) | (r3 >> 1);
+        uint32_t g8 = (g3 << 5) | (g3 << 2) | (g3 >> 1);
+        uint32_t b8 = (b2 << 6) | (b2 << 4) | (b2 << 2) | b2;
+        rgb332_lut[i] = r8 | (g8 << 8) | (b8 << 16) | 0xFF000000u;
+    }
+}
+
+#endif
+
 #define ALIGN(x, a) (((x) + (a - 1)) & ~(a - 1))
 
 #define MAX_TEXTURES 3072
@@ -469,32 +531,61 @@ static Color4 combine_tex_tex_rgba(const rv_t z, const rv_t *props) {
 /* fragment plotters */
 
 static void draw_pixel(const int idx, UNUSED const uint16_t z, Color4 src) {
+#ifdef TARGET_POCKET
+    { uint8_t c = rgba_to_332(src.r, src.g, src.b);
+    fb_cache[idx] = c; FB_BRAM[idx] = c; }
+#else
     gfx_output[idx] = src.c;
+#endif
 }
 
 static void draw_pixel_zwrite(const int idx, const uint16_t z, Color4 src) {
+#ifdef TARGET_POCKET
+    { uint8_t c = rgba_to_332(src.r, src.g, src.b);
+    fb_cache[idx] = c; FB_BRAM[idx] = c; }
+#else
     gfx_output[idx] = src.c;
+#endif
     z_buffer[idx] = z;
 }
 
 static void draw_pixel_blend(const int idx, UNUSED const uint16_t z, Color4 src) {
     const uint8_t a = src.a;
     const uint8_t ia = 255 - a;
+#ifdef TARGET_POCKET
+    /* Read dst from FB BRAM (correct for both HW and CPU pixels after drain) */
+    const Color4 dst = (Color4) { .c = rgb332_lut[FB_BRAM[idx]] };
+#else
     const Color4 dst = (Color4) { .c = gfx_output[idx] };
+#endif
     src.r = MULT_U8(src.r, a) + MULT_U8(dst.r, ia);
     src.g = MULT_U8(src.g, a) + MULT_U8(dst.g, ia);
     src.b = MULT_U8(src.b, a) + MULT_U8(dst.b, ia);
+#ifdef TARGET_POCKET
+    { uint8_t c = rgba_to_332(src.r, src.g, src.b);
+    fb_cache[idx] = c; FB_BRAM[idx] = c; }
+#else
     gfx_output[idx] = src.c;
+#endif
 }
 
 static void draw_pixel_blend_zwrite(const int idx, const uint16_t z, Color4 src) {
     const uint8_t a = src.a;
     const uint8_t ia = 255 - a;
+#ifdef TARGET_POCKET
+    const Color4 dst = (Color4) { .c = rgb332_lut[FB_BRAM[idx]] };
+#else
     const Color4 dst = (Color4) { .c = gfx_output[idx] };
+#endif
     src.r = MULT_U8(src.r, a) + MULT_U8(dst.r, ia);
     src.g = MULT_U8(src.g, a) + MULT_U8(dst.g, ia);
     src.b = MULT_U8(src.b, a) + MULT_U8(dst.b, ia);
+#ifdef TARGET_POCKET
+    { uint8_t c = rgba_to_332(src.r, src.g, src.b);
+    fb_cache[idx] = c; FB_BRAM[idx] = c; }
+#else
     gfx_output[idx] = src.c;
+#endif
     z_buffer[idx] = z;
 }
 
@@ -502,11 +593,20 @@ static void draw_pixel_blend_edge(const int idx, UNUSED const uint16_t z, Color4
     if (src.a > 0x80) {
         const uint8_t a = src.a;
         const uint8_t ia = 255 - a;
+#ifdef TARGET_POCKET
+        const Color4 dst = (Color4) { .c = rgb332_lut[FB_BRAM[idx]] };
+#else
         const Color4 dst = (Color4) { .c = gfx_output[idx] };
+#endif
         src.r = MULT_U8(src.r, a) + MULT_U8(dst.r, ia);
         src.g = MULT_U8(src.g, a) + MULT_U8(dst.g, ia);
         src.b = MULT_U8(src.b, a) + MULT_U8(dst.b, ia);
+#ifdef TARGET_POCKET
+        { uint8_t c = rgba_to_332(src.r, src.g, src.b);
+        fb_cache[idx] = c; FB_BRAM[idx] = c; }
+#else
         gfx_output[idx] = src.c;
+#endif
     }
 }
 
@@ -514,11 +614,20 @@ static void draw_pixel_blend_edge_zwrite(const int idx, const uint16_t z, Color4
     if (src.a > 0x80) {
         const uint8_t a = src.a;
         const uint8_t ia = 255 - a;
+#ifdef TARGET_POCKET
+        const Color4 dst = (Color4) { .c = rgb332_lut[FB_BRAM[idx]] };
+#else
         const Color4 dst = (Color4) { .c = gfx_output[idx] };
+#endif
         src.r = MULT_U8(src.r, a) + MULT_U8(dst.r, ia);
         src.g = MULT_U8(src.g, a) + MULT_U8(dst.g, ia);
         src.b = MULT_U8(src.b, a) + MULT_U8(dst.b, ia);
+#ifdef TARGET_POCKET
+        { uint8_t c = rgba_to_332(src.r, src.g, src.b);
+        fb_cache[idx] = c; FB_BRAM[idx] = c; }
+#else
         gfx_output[idx] = src.c;
+#endif
         z_buffer[idx] = z;
     }
 }
@@ -703,7 +812,8 @@ static inline void gfx_soft_pick_draw_func(void);
                 int vr = RV_TO_INT(RV_MUL(p[6], w)); if (vr < 0) vr = 0; else if (vr > 255) vr = 255; \
                 int vg = RV_TO_INT(RV_MUL(p[7], w)); if (vg < 0) vg = 0; else if (vg > 255) vg = 255; \
                 int vb = RV_TO_INT(RV_MUL(p[8], w)); if (vb < 0) vb = 0; else if (vb > 255) vb = 255; \
-                gfx_output[idx] = (Color4){{ .r = MULT_U8(tc.r, (uint8_t)vr), .g = MULT_U8(tc.g, (uint8_t)vg), .b = MULT_U8(tc.b, (uint8_t)vb), .a = 0xFF }}.c; \
+                { uint8_t c = rgba_to_332(MULT_U8(tc.r, (uint8_t)vr), MULT_U8(tc.g, (uint8_t)vg), MULT_U8(tc.b, (uint8_t)vb)); \
+                fb_cache[idx] = c; FB_BRAM[idx] = c; } \
                 if (z_write) z_buffer[idx] = uz; \
             } \
             for (i = 2; i < nprops; ++i) p[i] += dp_x[i]; \
@@ -765,11 +875,12 @@ static void rast_fast_texrgb_zwrite(const struct Tri tri) {
                 if (src.a > 0x80) { \
                     const uint8_t a = src.a; \
                     const uint8_t ia = 255 - a; \
-                    const Color4 dst = (Color4){ .c = gfx_output[idx] }; \
+                    const Color4 dst = (Color4) { .c = rgb332_lut[FB_BRAM[idx]] }; \
                     src.r = MULT_U8(src.r, a) + MULT_U8(dst.r, ia); \
                     src.g = MULT_U8(src.g, a) + MULT_U8(dst.g, ia); \
                     src.b = MULT_U8(src.b, a) + MULT_U8(dst.b, ia); \
-                    gfx_output[idx] = src.c; \
+                    { uint8_t c = rgba_to_332(src.r, src.g, src.b); \
+                    fb_cache[idx] = c; FB_BRAM[idx] = c; } \
                     if (z_write) z_buffer[idx] = uz; \
                 } \
             } \
@@ -783,6 +894,9 @@ static void rast_fast_texrgb_zwrite(const struct Tri tri) {
     }
 
 static void rast_fast_texrgba_edge_zwrite(const struct Tri tri) {
+#ifdef TARGET_POCKET
+    span_drain();  /* Ensure HW FIFO is flushed before blend reads */
+#endif
     if (__builtin_expect(cur_tex[0]->sample != tex_sample_nearest_rr, 0)) {
         gfx_soft_pick_draw_func();
         rast_fn_10(tri);
@@ -817,7 +931,8 @@ static void rast_fast_texrgba_edge_zwrite(const struct Tri tri) {
                 int vr = RV_TO_INT(RV_MUL(p[4], w)); if (vr < 0) vr = 0; else if (vr > 255) vr = 255; \
                 int vg = RV_TO_INT(RV_MUL(p[5], w)); if (vg < 0) vg = 0; else if (vg > 255) vg = 255; \
                 int vb = RV_TO_INT(RV_MUL(p[6], w)); if (vb < 0) vb = 0; else if (vb > 255) vb = 255; \
-                gfx_output[idx] = (Color4){{ .r = (uint8_t)vr, .g = (uint8_t)vg, .b = (uint8_t)vb, .a = 0xFF }}.c; \
+                { uint8_t c = rgba_to_332((uint8_t)vr, (uint8_t)vg, (uint8_t)vb); \
+                fb_cache[idx] = c; FB_BRAM[idx] = c; } \
                 if (z_write) z_buffer[idx] = uz; \
             } \
             for (i = 2; i < nprops; ++i) p[i] += dp_x[i]; \
@@ -858,7 +973,9 @@ static void rast_fast_rgb_zwrite(const struct Tri tri) {
                 w = RV_RCP(p[3]); \
                 const int tx = RV_TO_INT(RV_MUL(RV_MUL(p[4], w), _tex->fw)) & _tex->wrap_w; \
                 const int ty = RV_TO_INT(RV_MUL(RV_MUL(p[5], w), _tex->fh)) & _tex->wrap_h; \
-                gfx_output[idx] = ((const uint32_t *)(texcache + _tex->addr))[ty * _tex->w + tx]; \
+                { const Color4 _tc = (Color4){ .c = ((const uint32_t *)(texcache + _tex->addr))[ty * _tex->w + tx] }; \
+                uint8_t c = rgba_to_332(_tc.r, _tc.g, _tc.b); \
+                fb_cache[idx] = c; FB_BRAM[idx] = c; } \
                 if (z_write) z_buffer[idx] = uz; \
             } \
             for (i = 2; i < nprops; ++i) p[i] += dp_x[i]; \
@@ -877,6 +994,138 @@ static void rast_fast_tex_zwrite(const struct Tri tri) {
         return;
     }
     R_RASTERIZE_IMPL(tri, 6, R_SEG_TEX_ZWRITE);
+}
+
+/* ============================================================
+ * Hardware span rasterizer dispatch for texrgb mode.
+ * CPU does triangle setup + edge walk, HW does per-pixel inner loop.
+ * ~19 HW clocks/pixel vs ~50+ SW clocks/pixel for texrgb.
+ * ============================================================ */
+
+/* Track uploaded texture to avoid redundant uploads */
+static uint32_t hw_tex_addr = 0xFFFFFFFF;
+
+/* HW scanline macro: push FIFO commands for each scanline.
+ * HW rasterizer processes them asynchronously while CPU continues. */
+#define R_SEG_HW_TEXRGB(y_a, y_b, nprops) \
+    register int y = y_a; \
+    register int y_end = y_b; \
+    register int x, x_end; \
+    rv_t dx; \
+    while (y < y_end) { \
+        x = imax(r_clip.x0, RV_TO_INT(x_a)); \
+        x_end = imin(r_clip.x1, RV_TO_INT(x_b)); \
+        if (x < x_end) { \
+            dx = RV_ONE - (x_a - RV_FROM_INT(x)); \
+            for (i = 2; i < nprops; ++i) p[i] = p_a[i] + RV_MUL(dx, dp_x[i]); \
+            int _fb_idx = scr_width * (scr_height - y - 1) + x; \
+            span_push_scanline(_fb_idx, _fb_idx, x_end - x, \
+                p[2], p[3], p[4], p[5], p[6], p[7], p[8]); \
+        } \
+        x_a += dxdy_a; \
+        x_b += dxdy_b; \
+        for (i = 2; i < nprops; ++i) p_a[i] += dpdy_a[i]; \
+        ++y; \
+    }
+
+/* Extended R_RASTERIZE_IMPL with a SETUP hook called after dp computation */
+#define R_RASTERIZE_IMPL_EX(tri, nprops, SEG, SETUP) \
+    const rv_t *v0 = tri.v0; \
+    const rv_t *v1 = tri.v1; \
+    const rv_t *v2 = tri.v2; \
+    const int y0i = imax(r_clip.y0, RV_TO_INT(v0[1])); \
+    const int y1i = imax(y0i, RV_TO_INT(v1[1])); \
+    const int y2i = imin(r_clip.y1, RV_TO_INT(v2[1])); \
+    if ((y0i == y1i && y0i == y2i) || (RV_TO_INT(v0[0]) == RV_TO_INT(v1[0]) && RV_TO_INT(v0[0]) == RV_TO_INT(v2[0]))) \
+        return; \
+    const Vector4 ab = (Vector4) {{ v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2], v1[3] - v0[3] }}; \
+    const Vector4 ac = (Vector4) {{ v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2], v2[3] - v0[3] }}; \
+    const Vector2 bc = (Vector2) {{ v2[0] - v1[0], v2[1] - v1[1] }}; \
+    const rv_t dxdy_ab = rv_div_sat(ab.x, ab.y); \
+    const rv_t dxdy_ac = rv_div_sat(ac.x, ac.y); \
+    const rv_t dxdy_bc = rv_div_sat(bc.x, bc.y); \
+    const rv_t y_pre0 = RV_ONE - (v0[1] - RV_FROM_INT(y0i)); \
+    rv_t dpdy_a[nprops]; \
+    rv_t p_a[nprops]; \
+    rv_t p[nprops]; \
+    rv_t dp_x[nprops]; \
+    rv_t dp_y[nprops]; \
+    register int i; \
+    const rv_t _tri_cross = RV_MUL(ac.x, ab.y) - RV_MUL(ab.x, ac.y); \
+    RV_REJECT_THIN(_tri_cross); \
+    const bool side = _tri_cross > 0; \
+    R_COMPUTE_DENOM_AND_DP(dp_x, dp_y, v0, v1, v2, ab, ac, nprops); \
+    SETUP; \
+    if (!side) { \
+        const rv_t dxdy_a = dxdy_ac; \
+        rv_t x_a = v0[0] + RV_MUL(y_pre0, dxdy_a); \
+        for (i = 2; i < nprops; ++i) { \
+            dpdy_a[i] = rv_mul_wide(dxdy_ac, dp_x[i]) + dp_y[i]; \
+            p_a[i] = v0[i] + RV_MUL(y_pre0, dpdy_a[i]); \
+        } \
+        if (y0i < y1i) { \
+            const rv_t dxdy_b = dxdy_ab; \
+            rv_t x_b = v0[0] + RV_MUL(y_pre0, dxdy_ab); \
+            SEG(y0i, y1i, nprops); \
+        } \
+        if (y1i < y2i) { \
+            const rv_t dxdy_b = dxdy_bc; \
+            const rv_t y_pre1 = RV_ONE - (v1[1] - RV_FROM_INT(y1i)); \
+            rv_t x_b = v1[0] + RV_MUL(y_pre1, dxdy_bc); \
+            SEG(y1i, y2i, nprops); \
+        } \
+    } else { \
+        const rv_t dxdy_b = dxdy_ac; \
+        rv_t x_b = v0[0] + RV_MUL(y_pre0, dxdy_ac); \
+        if (y0i < y1i) { \
+            const rv_t dxdy_a = dxdy_ab; \
+            rv_t x_a = v0[0] + RV_MUL(y_pre0, dxdy_a); \
+            for (i = 2; i < nprops; ++i) { \
+                dpdy_a[i] = rv_mul_wide(dxdy_ab, dp_x[i]) + dp_y[i]; \
+                p_a[i] = v0[i] + RV_MUL(y_pre0, dpdy_a[i]); \
+            } \
+            SEG(y0i, y1i, nprops); \
+        } \
+        if (y1i < y2i) { \
+            const rv_t y_pre1 = RV_ONE - (v1[1] - RV_FROM_INT(y1i)); \
+            const rv_t dxdy_a = dxdy_bc; \
+            rv_t x_a = v1[0] + RV_MUL(y_pre1, dxdy_a); \
+            for (i = 2; i < nprops; ++i) { \
+                dpdy_a[i] = rv_mul_wide(dxdy_bc, dp_x[i]) + dp_y[i]; \
+                p_a[i] = v1[i] + RV_MUL(y_pre1, dpdy_a[i]); \
+            } \
+            SEG(y1i, y2i, nprops); \
+        } \
+    }
+
+static void rast_hw_texrgb_zwrite(const struct Tri tri) {
+    const struct Texture *_tex = cur_tex[0];
+
+    /* Fall back to SW for non-repeat or oversized textures */
+    if (__builtin_expect(_tex->sample != tex_sample_nearest_rr, 0) ||
+        __builtin_expect(_tex->w > 32 || _tex->h > 32, 0)) {
+        span_drain();  /* SW fallback needs port A */
+        rast_fast_texrgb_zwrite(tri);
+        return;
+    }
+
+    /* Upload texture to HW BRAM if changed (drains FIFO first) */
+    if (_tex->addr != hw_tex_addr) {
+        hw_tex_addr = _tex->addr;
+        span_upload_texture((const uint32_t *)(texcache + _tex->addr), _tex->w * _tex->h);
+    }
+
+    R_RASTERIZE_IMPL_EX(tri, 9, R_SEG_HW_TEXRGB, {
+        span_push_config(
+            SPAN_MODE_TEXRGB
+                | (z_test  ? SPAN_FLAG_Z_TEST  : 0)
+                | (z_write ? SPAN_FLAG_Z_WRITE : 0),
+            dp_x[2], dp_x[3], dp_x[4], dp_x[5],
+            dp_x[6], dp_x[7], dp_x[8],
+            _tex->fw, _tex->fh,
+            _tex->wrap_w, _tex->wrap_h,
+            ilog2(_tex->w), z_offset);
+    });
 }
 
 #endif /* TARGET_POCKET */
@@ -948,11 +1197,25 @@ static inline void pop_triangle(rv_t *buf, const int stride) {
 }
 
 static inline void depth_clear(void) {
+#ifdef TARGET_POCKET
+    /* Clear ZB BRAM via word writes (uncached MMIO) */
+    for (int _i = 0; _i < 9600; _i++)
+        ZB_BRAM_W[_i] = 0xFFFFFFFF;
+#else
     memset(z_buffer, 0xFF, scr_size << 1);
+#endif
 }
 
 static inline void color_clear(void) {
+#ifdef TARGET_POCKET
+    span_drain();  /* Ensure port A is free for CPU writes */
+    memset(fb_cache, 0x00, scr_size);
+    /* Clear FB BRAM draw page so old pixels don't persist */
+    for (int i = 0; i < 4800; i++)
+        FB_BRAM_W[i] = 0;
+#else
     memset(gfx_output, 0x00, scr_size << 2);
+#endif
 }
 
 /* FIXME: ztrick fucks with sky blending
@@ -1064,9 +1327,9 @@ static struct ShaderProgram *gfx_soft_create_and_load_new_shader(uint32_t shader
     // Specialized fast-path rasterizers: inline combine+sample+draw to eliminate
     // ~36 cycles of per-pixel function-pointer overhead.
     if (prg->draw_flags == 0) {
-        // HW span rasterizer disabled — use SW fast-path rasterizers only
+        // HW span rasterizer via FIFO (writes FB BRAM asynchronously)
         if (prg->mix == SH_MT_TEXTURE_COLOR && !ccf.opt_fog && !ccf.opt_alpha && ccf.num_inputs == 1)
-            prg->rast = rast_fast_texrgb_zwrite;       // SW tex+rgb, 9 props
+            prg->rast = rast_hw_texrgb_zwrite;
         else if (prg->mix == SH_MT_TEXTURE && !ccf.opt_fog)
             prg->rast = rast_fast_tex_zwrite;          // SW tex only, 6 props
         else if (prg->mix == SH_MT_COLOR && !ccf.opt_fog && !ccf.opt_alpha)
@@ -1225,8 +1488,38 @@ static inline void gfx_soft_pick_draw_func(void) {
     draw_fn = draw_funcs[cur_shader->draw_flags | z_write];
 }
 
+static int batch_log_frame = -1;
+int batch_log_idx = 0;
+
 static void gfx_soft_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
     gfx_soft_pick_draw_func();
+#ifdef TARGET_POCKET
+    /* SW paths write FB BRAM via CPU port A, which is blocked when span_active.
+     * Drain HW FIFO before any non-HW rasterizer so CPU writes aren't dropped. */
+    if (cur_shader->rast != rast_hw_texrgb_zwrite)
+        span_drain();
+
+    /* Batch order diagnostic: log batches on frame 5 with center pixel state */
+    extern int diag_frame;
+    if (diag_frame == 5 && batch_log_idx < 40) {
+        const char *type = "?";
+        if (cur_shader->rast == rast_hw_texrgb_zwrite) type = "HW";
+        else if (cur_shader->rast == rast_fast_texrgba_edge_zwrite) type = "AE";
+        else if (cur_shader->rast == rast_fast_texrgb_zwrite) type = "TX";
+        else if (cur_shader->rast == rast_fast_rgb_zwrite) type = "RG";
+        else if (cur_shader->rast == rast_fast_tex_zwrite) type = "T1";
+        extern void term_printf(const char *fmt, ...);
+        /* Drain so we can safely read ZB/FB BRAM */
+        span_drain();
+        int cidx = 160 * 59 + 80;  /* center pixel */
+        uint8_t fb = ((volatile uint8_t *)0x47000000)[cidx];
+        uint16_t zv = z_buffer[cidx];
+        term_printf("B%d:%s(%d) zo=%d fb=%02x z=%04x\n",
+                    batch_log_idx, type, (int)buf_vbo_num_tris,
+                    z_offset, fb, zv);
+        batch_log_idx++;
+    }
+#endif
     const size_t num_verts = 3 * buf_vbo_num_tris;
     const size_t stride = buf_vbo_len / num_verts;
     for (size_t i = 0; i < num_verts * stride; i += 3 * stride)
@@ -1239,6 +1532,19 @@ static void gfx_soft_fill_rect(int x0, int y0, int x1, int y1, const uint8_t *rg
     y0 = imax(0, y0);
     x1 = imin(scr_width, x1);
     y1 = imin(scr_height, y1);
+#ifdef TARGET_POCKET
+    span_drain();  /* Ensure port A is free for CPU writes */
+    const uint8_t c332 = rgba_to_332(rgba[0], rgba[1], rgba[2]);
+    register int y;
+    for (y = y0; y < y1; ++y) {
+        register int idx = y * scr_width + x0;
+        register int x;
+        for (x = x0; x < x1; ++x, ++idx) {
+            fb_cache[idx] = c332;
+            FB_BRAM[idx] = c332;
+        }
+    }
+#else
     register const uint32_t color = *(uint32_t *)rgba;
     register uint32_t *base = gfx_output + y0 * scr_width + x0;
     register uint32_t *p;
@@ -1248,6 +1554,7 @@ static void gfx_soft_fill_rect(int x0, int y0, int x1, int y1, const uint8_t *rg
         for (x = x0; x < x1; ++x, ++p)
             *p = color;
     }
+#endif
 }
 
 static inline void gfx_soft_tex_rect_replace(int x0, int y0, int x1, int y1, const rv_t u0, const rv_t v0, const rv_t dudx, const rv_t dvdy) {
@@ -1284,6 +1591,9 @@ static void gfx_soft_tex_rect(int x0, int y0, int x1, int y1, const float u0, co
     x1 = imin(scr_width, x1);
     y1 = imin(scr_height, y1);
     gfx_soft_pick_draw_func();
+#ifdef TARGET_POCKET
+    span_drain();  /* Ensure HW FIFO is flushed before CPU writes to FB BRAM */
+#endif
     if (cur_shader->cc.num_inputs)
         gfx_soft_tex_rect_modulate(x0, y0, x1, y1, u0, v0, dudx, dvdy, *(Color4 *)rgba);
     else
@@ -1310,20 +1620,31 @@ static void gfx_soft_set_resolution(const int width, const int height) {
     scr_height = height;
     scr_size = scr_width * scr_height;
 
+#ifdef TARGET_POCKET
+    /* Z-buffer in BRAM — shared with HW span rasterizer */
+    z_buffer = (uint16_t *)0x46000000;
+#else
     if (z_buffer) free(z_buffer);
-    if (gfx_output) free(gfx_output);
-
     z_buffer = calloc(scr_width * scr_height, sizeof(int16_t));
     if (!z_buffer) {
         printf("gfx_soft: could not alloc zbuffer for %dx%d\n", scr_width, scr_height);
         abort();
     }
+#endif
 
+#ifdef TARGET_POCKET
+    /* Cached RGB332 shadow buffer for CPU rendering (19200 bytes) */
+    if (fb_cache) free(fb_cache);
+    fb_cache = calloc(scr_width * scr_height, 1);
+    gfx_output = NULL;
+#else
+    if (gfx_output) free(gfx_output);
     gfx_output = calloc(scr_width * scr_height, sizeof(uint32_t));
     if (!gfx_output) {
         printf("gfx_soft: could not alloc color buffer for %dx%d\n", scr_width, scr_height);
         abort();
     }
+#endif
 
     depth_clear();
 }
@@ -1344,6 +1665,10 @@ static void gfx_soft_init(void) {
 
     gfx_soft_prepare_tables();
 
+#ifdef TARGET_POCKET
+    init_rgb332_lut();
+#endif
+
     gfx_soft_set_resolution(gfx_current_dimensions.width, gfx_current_dimensions.height);
 }
 
@@ -1351,10 +1676,15 @@ static void gfx_soft_start_frame(void) {
     // depth_swap(); // FIXME: ztrick
     color_clear();
     depth_clear();
+#ifdef TARGET_POCKET
+    hw_tex_addr = 0xFFFFFFFF; /* force texture re-upload on first use */
+#endif
 }
 
 static void gfx_soft_shutdown(void) {
+#ifndef TARGET_POCKET
     free(z_buffer);
+#endif
     free(texcache);
 }
 

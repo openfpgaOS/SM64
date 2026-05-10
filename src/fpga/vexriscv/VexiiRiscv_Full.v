@@ -146,8 +146,8 @@ module VexiiRiscv (
   wire       [30:0]   BtbPlugin_logic_ras_mem_stack_spinal_port0;
   reg        [31:0]   LsuL1Plugin_logic_banks_0_mem_spinal_port1;
   reg        [31:0]   LsuL1Plugin_logic_banks_1_mem_spinal_port1;
-  reg        [17:0]   LsuL1Plugin_logic_ways_0_mem_spinal_port1;
-  reg        [17:0]   LsuL1Plugin_logic_ways_1_mem_spinal_port1;
+  reg        [18:0]   LsuL1Plugin_logic_ways_0_mem_spinal_port1;
+  reg        [18:0]   LsuL1Plugin_logic_ways_1_mem_spinal_port1;
   reg        [2:0]    LsuL1Plugin_logic_shared_mem_spinal_port1;
   reg        [31:0]   LsuL1Plugin_logic_writeback_victimBuffer_spinal_port1;
   wire       [15:0]   early0_FixedPointMacPlugin_logic_rcpLut_spinal_port0;
@@ -233,9 +233,9 @@ module VexiiRiscv (
   wire                _zz_early0_BarrelShifterPlugin_logic_shift_patched_4;
   wire       [0:0]    _zz_early0_BarrelShifterPlugin_logic_shift_patched_5;
   wire       [9:0]    _zz_early0_BarrelShifterPlugin_logic_shift_patched_6;
-  wire       [17:0]   _zz_LsuL1Plugin_logic_ways_0_mem_port;
+  wire       [18:0]   _zz_LsuL1Plugin_logic_ways_0_mem_port;
   wire                _zz_LsuL1Plugin_logic_ways_0_mem_port_1;
-  wire       [17:0]   _zz_LsuL1Plugin_logic_ways_1_mem_port;
+  wire       [18:0]   _zz_LsuL1Plugin_logic_ways_1_mem_port;
   wire                _zz_LsuL1Plugin_logic_ways_1_mem_port_1;
   wire       [2:0]    _zz_LsuL1Plugin_logic_shared_mem_port;
   wire       [0:0]    _zz_LsuL1Plugin_logic_shared_lsuRead_rsp_plru_0_1;
@@ -263,9 +263,9 @@ module VexiiRiscv (
   wire       [2:0]    _zz_51;
   wire       [1:0]    _zz_LsuL1Plugin_logic_shared_write_payload_data_dirty;
   wire       [0:0]    _zz_when;
-  reg        [15:0]   _zz__zz_LsuL1Plugin_logic_waysWrite_tag_address;
+  reg        [16:0]   _zz__zz_LsuL1Plugin_logic_waysWrite_tag_address;
   reg                 _zz_LsuL1Plugin_logic_waysWrite_tag_fault;
-  reg        [15:0]   _zz_LsuL1Plugin_logic_writeback_push_payload_address;
+  reg        [16:0]   _zz_LsuL1Plugin_logic_writeback_push_payload_address;
   wire       [0:0]    _zz_LsuL1Plugin_logic_shared_write_payload_data_plru_0_1;
   wire       [31:0]   _zz_execute_ctrl1_down_RsUnsignedPlugin_RS1_UNSIGNED_lane0;
   wire       [0:0]    _zz_execute_ctrl1_down_RsUnsignedPlugin_RS1_UNSIGNED_lane0_1;
@@ -537,7 +537,7 @@ module VexiiRiscv (
   wire       [77:0]   _zz_LsuPlugin_logic_storeBuffer_ops_mem_port_2;
   wire       [11:0]   _zz_LsuPlugin_logic_onAddress0_ls_storeId;
   wire       [0:0]    _zz_LsuPlugin_logic_onAddress0_ls_storeId_1;
-  wire       [16:0]   _zz_LsuPlugin_logic_onAddress0_flush_port_payload_address;
+  wire       [15:0]   _zz_LsuPlugin_logic_onAddress0_flush_port_payload_address;
   reg        [7:0]    _zz_LsuPlugin_logic_onCtrl_loadData_shifted;
   wire       [1:0]    _zz_LsuPlugin_logic_onCtrl_loadData_shifted_1;
   reg        [7:0]    _zz_LsuPlugin_logic_onCtrl_loadData_shifted_2;
@@ -552,7 +552,7 @@ module VexiiRiscv (
   wire                _zz_execute_ctrl3_down_LsuL1_ABORD_lane0;
   wire                _zz_execute_ctrl3_down_LsuL1_ABORD_lane0_1;
   wire                _zz_execute_ctrl3_down_LsuL1_SKIP_WRITE_lane0;
-  wire       [9:0]    _zz_LsuPlugin_logic_flusher_cmdCounter;
+  wire       [8:0]    _zz_LsuPlugin_logic_flusher_cmdCounter;
   wire       [0:0]    _zz_early0_EnvPlugin_logic_exe_xretPriv_1;
   wire       [4:0]    _zz_early0_EnvPlugin_logic_trapPort_payload_code;
   wire       [4:0]    _zz_early0_EnvPlugin_logic_trapPort_payload_code_1;
@@ -1617,10 +1617,10 @@ module VexiiRiscv (
   reg        [62:0]   execute_ctrl3_up_early0_MulPlugin_logic_steps_0_adders_0_lane0;
   reg        [1:0]    execute_ctrl3_up_LsuL1Plugin_logic_WAYS_HITS_lane0;
   reg                 execute_ctrl3_up_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_loaded;
-  reg        [15:0]   execute_ctrl3_up_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_address;
+  reg        [16:0]   execute_ctrl3_up_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_address;
   reg                 execute_ctrl3_up_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_fault;
   reg                 execute_ctrl3_up_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_loaded;
-  reg        [15:0]   execute_ctrl3_up_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_address;
+  reg        [16:0]   execute_ctrl3_up_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_address;
   reg                 execute_ctrl3_up_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_fault;
   reg        [31:0]   execute_ctrl3_up_LsuL1_PHYSICAL_ADDRESS_lane0;
   reg        [1:0]    execute_ctrl3_up_LsuL1Plugin_logic_WRITE_TO_READ_HAZARDS_lane0;
@@ -3456,10 +3456,10 @@ module VexiiRiscv (
   wire       [1:0]    execute_ctrl3_down_LsuL1Plugin_logic_WRITE_TO_READ_HAZARDS_lane0;
   wire       [31:0]   execute_ctrl3_down_LsuL1_PHYSICAL_ADDRESS_lane0;
   wire                execute_ctrl3_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_loaded;
-  wire       [15:0]   execute_ctrl3_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_address;
+  wire       [16:0]   execute_ctrl3_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_address;
   wire                execute_ctrl3_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_fault;
   wire                execute_ctrl3_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_loaded;
-  wire       [15:0]   execute_ctrl3_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_address;
+  wire       [16:0]   execute_ctrl3_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_address;
   wire                execute_ctrl3_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_fault;
   wire       [0:0]    execute_ctrl3_down_LsuL1Plugin_logic_SHARED_lane0_plru_0;
   wire       [1:0]    execute_ctrl3_down_LsuL1Plugin_logic_SHARED_lane0_dirty;
@@ -3476,10 +3476,10 @@ module VexiiRiscv (
   wire       [1:0]    execute_ctrl2_down_LsuL1Plugin_logic_lsu_rt0_SHARED_BYPASS_VALUE_lane0_dirty;
   wire                execute_ctrl2_down_LsuL1Plugin_logic_lsu_rt0_SHARED_BYPASS_VALID_lane0;
   wire                execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_loaded;
-  wire       [15:0]   execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_address;
+  wire       [16:0]   execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_address;
   wire                execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_fault;
   wire                execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_loaded;
-  wire       [15:0]   execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_address;
+  wire       [16:0]   execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_address;
   wire                execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_fault;
   reg        [0:0]    execute_ctrl2_up_LsuL1Plugin_logic_SHARED_lane0_plru_0;
   reg        [1:0]    execute_ctrl2_up_LsuL1Plugin_logic_SHARED_lane0_dirty;
@@ -3659,49 +3659,49 @@ module VexiiRiscv (
   reg        [1:0]    LsuL1Plugin_logic_refillCompletions;
   wire                LsuL1Plugin_logic_writebackBusy;
   reg        [1:0]    LsuL1Plugin_logic_banksWrite_mask;
-  reg        [13:0]   LsuL1Plugin_logic_banksWrite_address;
+  reg        [12:0]   LsuL1Plugin_logic_banksWrite_address;
   reg        [31:0]   LsuL1Plugin_logic_banksWrite_writeData;
   reg        [3:0]    LsuL1Plugin_logic_banksWrite_writeMask;
   reg        [1:0]    LsuL1Plugin_logic_waysWrite_mask;
-  reg        [9:0]    LsuL1Plugin_logic_waysWrite_address;
+  reg        [8:0]    LsuL1Plugin_logic_waysWrite_address;
   reg                 LsuL1Plugin_logic_waysWrite_tag_loaded;
-  reg        [15:0]   LsuL1Plugin_logic_waysWrite_tag_address;
+  reg        [16:0]   LsuL1Plugin_logic_waysWrite_tag_address;
   reg                 LsuL1Plugin_logic_waysWrite_tag_fault;
   wire                LsuL1Plugin_logic_waysWrite_valid;
   wire                LsuL1Plugin_logic_banks_0_usedByWriteback;
   wire                LsuL1Plugin_logic_banks_0_write_valid;
-  wire       [13:0]   LsuL1Plugin_logic_banks_0_write_payload_address;
+  wire       [12:0]   LsuL1Plugin_logic_banks_0_write_payload_address;
   wire       [31:0]   LsuL1Plugin_logic_banks_0_write_payload_data;
   wire       [3:0]    LsuL1Plugin_logic_banks_0_write_payload_mask;
   reg                 LsuL1Plugin_logic_banks_0_read_cmd_valid;
-  reg        [13:0]   LsuL1Plugin_logic_banks_0_read_cmd_payload;
+  reg        [12:0]   LsuL1Plugin_logic_banks_0_read_cmd_payload;
   (* keep , syn_keep *) wire       [31:0]   LsuL1Plugin_logic_banks_0_read_rsp /* synthesis syn_keep = 1 */ ;
   wire                LsuL1Plugin_logic_banks_1_usedByWriteback;
   wire                LsuL1Plugin_logic_banks_1_write_valid;
-  wire       [13:0]   LsuL1Plugin_logic_banks_1_write_payload_address;
+  wire       [12:0]   LsuL1Plugin_logic_banks_1_write_payload_address;
   wire       [31:0]   LsuL1Plugin_logic_banks_1_write_payload_data;
   wire       [3:0]    LsuL1Plugin_logic_banks_1_write_payload_mask;
   reg                 LsuL1Plugin_logic_banks_1_read_cmd_valid;
-  reg        [13:0]   LsuL1Plugin_logic_banks_1_read_cmd_payload;
+  reg        [12:0]   LsuL1Plugin_logic_banks_1_read_cmd_payload;
   (* keep , syn_keep *) wire       [31:0]   LsuL1Plugin_logic_banks_1_read_rsp /* synthesis syn_keep = 1 */ ;
   wire                LsuL1Plugin_logic_ways_0_lsuRead_cmd_valid;
-  wire       [9:0]    LsuL1Plugin_logic_ways_0_lsuRead_cmd_payload;
+  wire       [8:0]    LsuL1Plugin_logic_ways_0_lsuRead_cmd_payload;
   (* keep , syn_keep *) wire                LsuL1Plugin_logic_ways_0_lsuRead_rsp_loaded /* synthesis syn_keep = 1 */ ;
-  (* keep , syn_keep *) wire       [15:0]   LsuL1Plugin_logic_ways_0_lsuRead_rsp_address /* synthesis syn_keep = 1 */ ;
+  (* keep , syn_keep *) wire       [16:0]   LsuL1Plugin_logic_ways_0_lsuRead_rsp_address /* synthesis syn_keep = 1 */ ;
   (* keep , syn_keep *) wire                LsuL1Plugin_logic_ways_0_lsuRead_rsp_fault /* synthesis syn_keep = 1 */ ;
-  wire       [17:0]   _zz_LsuL1Plugin_logic_ways_0_lsuRead_rsp_loaded;
+  wire       [18:0]   _zz_LsuL1Plugin_logic_ways_0_lsuRead_rsp_loaded;
   wire                LsuL1Plugin_logic_ways_1_lsuRead_cmd_valid;
-  wire       [9:0]    LsuL1Plugin_logic_ways_1_lsuRead_cmd_payload;
+  wire       [8:0]    LsuL1Plugin_logic_ways_1_lsuRead_cmd_payload;
   (* keep , syn_keep *) wire                LsuL1Plugin_logic_ways_1_lsuRead_rsp_loaded /* synthesis syn_keep = 1 */ ;
-  (* keep , syn_keep *) wire       [15:0]   LsuL1Plugin_logic_ways_1_lsuRead_rsp_address /* synthesis syn_keep = 1 */ ;
+  (* keep , syn_keep *) wire       [16:0]   LsuL1Plugin_logic_ways_1_lsuRead_rsp_address /* synthesis syn_keep = 1 */ ;
   (* keep , syn_keep *) wire                LsuL1Plugin_logic_ways_1_lsuRead_rsp_fault /* synthesis syn_keep = 1 */ ;
-  wire       [17:0]   _zz_LsuL1Plugin_logic_ways_1_lsuRead_rsp_loaded;
+  wire       [18:0]   _zz_LsuL1Plugin_logic_ways_1_lsuRead_rsp_loaded;
   reg                 LsuL1Plugin_logic_shared_write_valid;
-  reg        [9:0]    LsuL1Plugin_logic_shared_write_payload_address;
+  reg        [8:0]    LsuL1Plugin_logic_shared_write_payload_address;
   reg        [0:0]    LsuL1Plugin_logic_shared_write_payload_data_plru_0;
   reg        [1:0]    LsuL1Plugin_logic_shared_write_payload_data_dirty;
   wire                LsuL1Plugin_logic_shared_lsuRead_cmd_valid;
-  wire       [9:0]    LsuL1Plugin_logic_shared_lsuRead_cmd_payload;
+  wire       [8:0]    LsuL1Plugin_logic_shared_lsuRead_cmd_payload;
   (* keep , syn_keep *) wire       [0:0]    LsuL1Plugin_logic_shared_lsuRead_rsp_plru_0 /* synthesis syn_keep = 1 */ ;
   (* keep , syn_keep *) wire       [1:0]    LsuL1Plugin_logic_shared_lsuRead_rsp_dirty /* synthesis syn_keep = 1 */ ;
   wire       [2:0]    _zz_LsuL1Plugin_logic_shared_lsuRead_rsp_plru_0;
@@ -3864,7 +3864,7 @@ module VexiiRiscv (
   wire                when_Stream_l477_1;
   wire       [4:0]    _zz_LsuL1Plugin_logic_writeback_write_word;
   wire       [31:0]   LsuL1Plugin_logic_writeback_write_word;
-  wire       [13:0]   LsuL1Plugin_logic_lsu_rb0_readAddress;
+  wire       [12:0]   LsuL1Plugin_logic_lsu_rb0_readAddress;
   wire                when_LsuL1Plugin_l721;
   wire                when_LsuL1Plugin_l722;
   wire                when_LsuL1Plugin_l721_1;
@@ -3935,9 +3935,9 @@ module VexiiRiscv (
   wire       [2:0]    _zz_20;
   wire                when_LsuL1Plugin_l940;
   wire                when_LsuL1Plugin_l940_1;
-  wire       [15:0]   _zz_LsuL1Plugin_logic_waysWrite_tag_address;
+  wire       [16:0]   _zz_LsuL1Plugin_logic_waysWrite_tag_address;
   wire                when_LsuL1Plugin_l1028;
-  reg        [10:0]   LsuL1Plugin_logic_initializer_counter;
+  reg        [9:0]    LsuL1Plugin_logic_initializer_counter;
   wire                LsuL1Plugin_logic_initializer_done;
   wire                when_LsuL1Plugin_l1233;
   wire       [2:0]    _zz_LsuL1Plugin_logic_shared_write_payload_data_plru_0;
@@ -5045,7 +5045,7 @@ module VexiiRiscv (
   wire                LsuPlugin_logic_flusher_wantExit;
   reg                 LsuPlugin_logic_flusher_wantStart;
   wire                LsuPlugin_logic_flusher_wantKill;
-  reg        [10:0]   LsuPlugin_logic_flusher_cmdCounter;
+  reg        [9:0]    LsuPlugin_logic_flusher_cmdCounter;
   wire                LsuPlugin_logic_flusher_inflight;
   reg        [1:0]    LsuPlugin_logic_flusher_waiter;
   wire       [4:0]    LsuPlugin_logic_onAddress0_ls_prefetchOp;
@@ -6794,25 +6794,25 @@ module VexiiRiscv (
   `endif
 
   (* ram_style = "distributed" *) reg [30:0] BtbPlugin_logic_ras_mem_stack [0:3];
-  reg [7:0] LsuL1Plugin_logic_banks_0_mem_symbol0 [0:16383];
-  reg [7:0] LsuL1Plugin_logic_banks_0_mem_symbol1 [0:16383];
-  reg [7:0] LsuL1Plugin_logic_banks_0_mem_symbol2 [0:16383];
-  reg [7:0] LsuL1Plugin_logic_banks_0_mem_symbol3 [0:16383];
+  reg [7:0] LsuL1Plugin_logic_banks_0_mem_symbol0 [0:8191];
+  reg [7:0] LsuL1Plugin_logic_banks_0_mem_symbol1 [0:8191];
+  reg [7:0] LsuL1Plugin_logic_banks_0_mem_symbol2 [0:8191];
+  reg [7:0] LsuL1Plugin_logic_banks_0_mem_symbol3 [0:8191];
   reg [7:0] _zz_LsuL1Plugin_logic_banks_0_memsymbol_read;
   reg [7:0] _zz_LsuL1Plugin_logic_banks_0_memsymbol_read_1;
   reg [7:0] _zz_LsuL1Plugin_logic_banks_0_memsymbol_read_2;
   reg [7:0] _zz_LsuL1Plugin_logic_banks_0_memsymbol_read_3;
-  reg [7:0] LsuL1Plugin_logic_banks_1_mem_symbol0 [0:16383];
-  reg [7:0] LsuL1Plugin_logic_banks_1_mem_symbol1 [0:16383];
-  reg [7:0] LsuL1Plugin_logic_banks_1_mem_symbol2 [0:16383];
-  reg [7:0] LsuL1Plugin_logic_banks_1_mem_symbol3 [0:16383];
+  reg [7:0] LsuL1Plugin_logic_banks_1_mem_symbol0 [0:8191];
+  reg [7:0] LsuL1Plugin_logic_banks_1_mem_symbol1 [0:8191];
+  reg [7:0] LsuL1Plugin_logic_banks_1_mem_symbol2 [0:8191];
+  reg [7:0] LsuL1Plugin_logic_banks_1_mem_symbol3 [0:8191];
   reg [7:0] _zz_LsuL1Plugin_logic_banks_1_memsymbol_read;
   reg [7:0] _zz_LsuL1Plugin_logic_banks_1_memsymbol_read_1;
   reg [7:0] _zz_LsuL1Plugin_logic_banks_1_memsymbol_read_2;
   reg [7:0] _zz_LsuL1Plugin_logic_banks_1_memsymbol_read_3;
-  reg [17:0] LsuL1Plugin_logic_ways_0_mem [0:1023];
-  reg [17:0] LsuL1Plugin_logic_ways_1_mem [0:1023];
-  reg [2:0] LsuL1Plugin_logic_shared_mem [0:1023];
+  reg [18:0] LsuL1Plugin_logic_ways_0_mem [0:511];
+  reg [18:0] LsuL1Plugin_logic_ways_1_mem [0:511];
+  reg [2:0] LsuL1Plugin_logic_shared_mem [0:511];
   reg [31:0] LsuL1Plugin_logic_writeback_victimBuffer [0:31];
   reg [15:0] early0_FixedPointMacPlugin_logic_rcpLut [0:255];
   reg [15:0] early0_FixedPointMacPlugin_logic_rsqrtLut [0:511];
@@ -7076,7 +7076,7 @@ module VexiiRiscv (
   assign _zz_LsuPlugin_logic_onCtrl_rva_alu_addSub_5 = (LsuPlugin_logic_onCtrl_rva_alu_compare ? 2'b01 : 2'b00);
   assign _zz_LsuPlugin_logic_onCtrl_rva_alu_addSub_4 = {{30{_zz_LsuPlugin_logic_onCtrl_rva_alu_addSub_5[1]}}, _zz_LsuPlugin_logic_onCtrl_rva_alu_addSub_5};
   assign _zz_LsuPlugin_logic_trapPort_payload_code = (execute_ctrl3_down_LsuPlugin_logic_preCtrl_MISS_ALIGNED_lane0 ? (execute_ctrl3_down_LsuL1_STORE_lane0 ? 3'b110 : 3'b100) : 3'b000);
-  assign _zz_LsuPlugin_logic_flusher_cmdCounter = execute_ctrl3_down_LsuL1_MIXED_ADDRESS_lane0[15 : 6];
+  assign _zz_LsuPlugin_logic_flusher_cmdCounter = execute_ctrl3_down_LsuL1_MIXED_ADDRESS_lane0[14 : 6];
   assign _zz_early0_EnvPlugin_logic_exe_xretPriv_1 = ((_zz_early0_EnvPlugin_logic_exe_xretPriv == 2'b11) ? 1'b0 : early0_EnvPlugin_logic_exe_privilege[2]);
   assign _zz_early0_EnvPlugin_logic_trapPort_payload_code = (_zz_early0_EnvPlugin_logic_trapPort_payload_code_1 | 5'h08);
   assign _zz_early0_EnvPlugin_logic_trapPort_payload_code_1 = {{2{early0_EnvPlugin_logic_exe_privilege[2]}}, early0_EnvPlugin_logic_exe_privilege};
@@ -7681,7 +7681,7 @@ module VexiiRiscv (
   assign _zz__zz_FpuPackerPlugin_logic_pip_node_0_s0_FLAGS_NX_11 = FpuSqrtPlugin_logic_packPort_cmd_flags_NX;
   assign _zz__zz_FpuPackerPlugin_logic_pip_node_0_s0_FLAGS_NX_14 = FpuDivPlugin_logic_packPort_cmd_flags_UF;
   assign _zz__zz_FpuPackerPlugin_logic_pip_node_0_s0_FLAGS_NX_15 = FpuDivPlugin_logic_packPort_cmd_flags_NX;
-  assign _zz_LsuPlugin_logic_onPma_io_rsp_fault = 32'hfc000000;
+  assign _zz_LsuPlugin_logic_onPma_io_rsp_fault = 32'hbc000000;
   assign _zz_LsuPlugin_logic_onPma_io_rsp_fault_1 = 32'hffff0000;
   assign _zz_execute_lane0_api_hartsInflight = (! execute_ctrl8_down_COMPLETED_lane0);
   assign _zz_execute_lane0_api_hartsInflight_1 = (execute_ctrl7_up_LANE_SEL_lane0 && (! execute_ctrl7_down_COMPLETED_lane0));
@@ -10497,10 +10497,10 @@ module VexiiRiscv (
   end
 
   always @(*) begin
-    LsuL1Plugin_logic_banksWrite_address = 14'bxxxxxxxxxxxxxx;
-    LsuL1Plugin_logic_banksWrite_address = {LsuL1Plugin_logic_refill_read_rspAddress[15 : 6],LsuL1Plugin_logic_refill_read_wordIndex};
+    LsuL1Plugin_logic_banksWrite_address = 13'bxxxxxxxxxxxxx;
+    LsuL1Plugin_logic_banksWrite_address = {LsuL1Plugin_logic_refill_read_rspAddress[14 : 6],LsuL1Plugin_logic_refill_read_wordIndex};
     if(LsuL1Plugin_logic_lsu_ctrl_bankWriteReservation_win) begin
-      LsuL1Plugin_logic_banksWrite_address = execute_ctrl3_down_LsuL1_PHYSICAL_ADDRESS_lane0[15 : 2];
+      LsuL1Plugin_logic_banksWrite_address = execute_ctrl3_down_LsuL1_PHYSICAL_ADDRESS_lane0[14 : 2];
     end
   end
 
@@ -10549,17 +10549,17 @@ module VexiiRiscv (
   end
 
   always @(*) begin
-    LsuL1Plugin_logic_waysWrite_address = 10'bxxxxxxxxxx;
+    LsuL1Plugin_logic_waysWrite_address = 9'bxxxxxxxxx;
     if(LsuL1Plugin_logic_bus_read_rsp_valid) begin
       if(when_LsuL1Plugin_l466) begin
-        LsuL1Plugin_logic_waysWrite_address = LsuL1Plugin_logic_refill_read_rspAddress[15 : 6];
+        LsuL1Plugin_logic_waysWrite_address = LsuL1Plugin_logic_refill_read_rspAddress[14 : 6];
       end
     end
     if(LsuL1Plugin_logic_lsu_ctrl_doFlush) begin
-      LsuL1Plugin_logic_waysWrite_address = execute_ctrl3_down_LsuL1_MIXED_ADDRESS_lane0[15 : 6];
+      LsuL1Plugin_logic_waysWrite_address = execute_ctrl3_down_LsuL1_MIXED_ADDRESS_lane0[14 : 6];
     end
     if(when_LsuL1Plugin_l1233) begin
-      LsuL1Plugin_logic_waysWrite_address = LsuL1Plugin_logic_initializer_counter[9:0];
+      LsuL1Plugin_logic_waysWrite_address = LsuL1Plugin_logic_initializer_counter[8:0];
     end
   end
 
@@ -10579,10 +10579,10 @@ module VexiiRiscv (
   end
 
   always @(*) begin
-    LsuL1Plugin_logic_waysWrite_tag_address = 16'bxxxxxxxxxxxxxxxx;
+    LsuL1Plugin_logic_waysWrite_tag_address = 17'bxxxxxxxxxxxxxxxxx;
     if(LsuL1Plugin_logic_bus_read_rsp_valid) begin
       if(when_LsuL1Plugin_l466) begin
-        LsuL1Plugin_logic_waysWrite_tag_address = LsuL1Plugin_logic_refill_read_rspAddress[31 : 16];
+        LsuL1Plugin_logic_waysWrite_tag_address = LsuL1Plugin_logic_refill_read_rspAddress[31 : 15];
       end
     end
     if(LsuL1Plugin_logic_lsu_ctrl_doFlush) begin
@@ -10615,12 +10615,12 @@ module VexiiRiscv (
   assign LsuL1Plugin_logic_banks_1_read_rsp = LsuL1Plugin_logic_banks_1_mem_spinal_port1;
   assign _zz_LsuL1Plugin_logic_ways_0_lsuRead_rsp_loaded = LsuL1Plugin_logic_ways_0_mem_spinal_port1;
   assign LsuL1Plugin_logic_ways_0_lsuRead_rsp_loaded = _zz_LsuL1Plugin_logic_ways_0_lsuRead_rsp_loaded[0];
-  assign LsuL1Plugin_logic_ways_0_lsuRead_rsp_address = _zz_LsuL1Plugin_logic_ways_0_lsuRead_rsp_loaded[16 : 1];
-  assign LsuL1Plugin_logic_ways_0_lsuRead_rsp_fault = _zz_LsuL1Plugin_logic_ways_0_lsuRead_rsp_loaded[17];
+  assign LsuL1Plugin_logic_ways_0_lsuRead_rsp_address = _zz_LsuL1Plugin_logic_ways_0_lsuRead_rsp_loaded[17 : 1];
+  assign LsuL1Plugin_logic_ways_0_lsuRead_rsp_fault = _zz_LsuL1Plugin_logic_ways_0_lsuRead_rsp_loaded[18];
   assign _zz_LsuL1Plugin_logic_ways_1_lsuRead_rsp_loaded = LsuL1Plugin_logic_ways_1_mem_spinal_port1;
   assign LsuL1Plugin_logic_ways_1_lsuRead_rsp_loaded = _zz_LsuL1Plugin_logic_ways_1_lsuRead_rsp_loaded[0];
-  assign LsuL1Plugin_logic_ways_1_lsuRead_rsp_address = _zz_LsuL1Plugin_logic_ways_1_lsuRead_rsp_loaded[16 : 1];
-  assign LsuL1Plugin_logic_ways_1_lsuRead_rsp_fault = _zz_LsuL1Plugin_logic_ways_1_lsuRead_rsp_loaded[17];
+  assign LsuL1Plugin_logic_ways_1_lsuRead_rsp_address = _zz_LsuL1Plugin_logic_ways_1_lsuRead_rsp_loaded[17 : 1];
+  assign LsuL1Plugin_logic_ways_1_lsuRead_rsp_fault = _zz_LsuL1Plugin_logic_ways_1_lsuRead_rsp_loaded[18];
   assign _zz_LsuL1Plugin_logic_shared_lsuRead_rsp_plru_0 = LsuL1Plugin_logic_shared_mem_spinal_port1;
   assign LsuL1Plugin_logic_shared_lsuRead_rsp_plru_0 = _zz_LsuL1Plugin_logic_shared_lsuRead_rsp_plru_0_1[0 : 0];
   assign LsuL1Plugin_logic_shared_lsuRead_rsp_dirty = _zz_LsuL1Plugin_logic_shared_lsuRead_rsp_plru_0[2 : 1];
@@ -10801,10 +10801,10 @@ module VexiiRiscv (
   always @(*) begin
     LsuL1Plugin_logic_writeback_push_payload_address = 32'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;
     if(LsuL1Plugin_logic_lsu_ctrl_doFlush) begin
-      LsuL1Plugin_logic_writeback_push_payload_address = ({6'd0,{_zz_LsuL1Plugin_logic_waysWrite_tag_address,execute_ctrl3_down_LsuL1_MIXED_ADDRESS_lane0[15 : 6]}} <<< 3'd6);
+      LsuL1Plugin_logic_writeback_push_payload_address = ({6'd0,{_zz_LsuL1Plugin_logic_waysWrite_tag_address,execute_ctrl3_down_LsuL1_MIXED_ADDRESS_lane0[14 : 6]}} <<< 3'd6);
     end
     if(LsuL1Plugin_logic_lsu_ctrl_doRefill) begin
-      LsuL1Plugin_logic_writeback_push_payload_address = ({6'd0,{_zz_LsuL1Plugin_logic_writeback_push_payload_address,execute_ctrl3_down_LsuL1_MIXED_ADDRESS_lane0[15 : 6]}} <<< 3'd6);
+      LsuL1Plugin_logic_writeback_push_payload_address = ({6'd0,{_zz_LsuL1Plugin_logic_writeback_push_payload_address,execute_ctrl3_down_LsuL1_MIXED_ADDRESS_lane0[14 : 6]}} <<< 3'd6);
     end
   end
 
@@ -10853,7 +10853,7 @@ module VexiiRiscv (
 
   assign LsuL1Plugin_logic_banks_0_usedByWriteback = (LsuL1Plugin_logic_writeback_read_slotRead_valid && (LsuL1Plugin_logic_writeback_read_way == 1'b0));
   always @(*) begin
-    LsuL1Plugin_logic_banks_0_read_cmd_payload = {LsuL1Plugin_logic_writeback_read_address[15 : 6],LsuL1Plugin_logic_writeback_read_wordIndex};
+    LsuL1Plugin_logic_banks_0_read_cmd_payload = {LsuL1Plugin_logic_writeback_read_address[14 : 6],LsuL1Plugin_logic_writeback_read_wordIndex};
     if(when_LsuL1Plugin_l722) begin
       LsuL1Plugin_logic_banks_0_read_cmd_payload = LsuL1Plugin_logic_lsu_rb0_readAddress;
     end
@@ -10868,7 +10868,7 @@ module VexiiRiscv (
 
   assign LsuL1Plugin_logic_banks_1_usedByWriteback = (LsuL1Plugin_logic_writeback_read_slotRead_valid && (LsuL1Plugin_logic_writeback_read_way == 1'b1));
   always @(*) begin
-    LsuL1Plugin_logic_banks_1_read_cmd_payload = {LsuL1Plugin_logic_writeback_read_address[15 : 6],LsuL1Plugin_logic_writeback_read_wordIndex};
+    LsuL1Plugin_logic_banks_1_read_cmd_payload = {LsuL1Plugin_logic_writeback_read_address[14 : 6],LsuL1Plugin_logic_writeback_read_wordIndex};
     if(when_LsuL1Plugin_l722_1) begin
       LsuL1Plugin_logic_banks_1_read_cmd_payload = LsuL1Plugin_logic_lsu_rb0_readAddress;
     end
@@ -10916,7 +10916,7 @@ module VexiiRiscv (
   assign LsuL1Plugin_logic_bus_write_cmd_payload_fragment_data = LsuL1Plugin_logic_writeback_write_word;
   assign LsuL1Plugin_logic_bus_write_cmd_payload_fragment_id = LsuL1Plugin_logic_writeback_write_cmd_payload_id;
   assign LsuL1Plugin_logic_bus_write_cmd_payload_last = LsuL1Plugin_logic_writeback_write_cmd_payload_last;
-  assign LsuL1Plugin_logic_lsu_rb0_readAddress = execute_ctrl1_down_LsuL1_MIXED_ADDRESS_lane0[15 : 2];
+  assign LsuL1Plugin_logic_lsu_rb0_readAddress = execute_ctrl1_down_LsuL1_MIXED_ADDRESS_lane0[14 : 2];
   always @(*) begin
     execute_ctrl1_down_LsuL1Plugin_logic_BANK_BUSY_lane0[0] = LsuL1Plugin_logic_banks_0_usedByWriteback;
     execute_ctrl1_down_LsuL1Plugin_logic_BANK_BUSY_lane0[1] = LsuL1Plugin_logic_banks_1_usedByWriteback;
@@ -10949,14 +10949,14 @@ module VexiiRiscv (
   assign execute_ctrl2_LsuL1Plugin_logic_FREEZE_HAZARD_lane0_bypass = (execute_ctrl2_up_LsuL1Plugin_logic_FREEZE_HAZARD_lane0 || LsuL1Plugin_logic_slotsFreezeHazard);
   assign execute_ctrl3_LsuL1Plugin_logic_FREEZE_HAZARD_lane0_bypass = (execute_ctrl3_up_LsuL1Plugin_logic_FREEZE_HAZARD_lane0 || LsuL1Plugin_logic_slotsFreezeHazard);
   assign LsuL1Plugin_logic_shared_lsuRead_cmd_valid = (! execute_freeze_valid);
-  assign LsuL1Plugin_logic_shared_lsuRead_cmd_payload = execute_ctrl1_down_LsuL1_MIXED_ADDRESS_lane0[15 : 6];
-  assign execute_ctrl1_down_LsuL1Plugin_logic_lsu_rt0_SHARED_BYPASS_VALID_lane0 = (LsuL1Plugin_logic_shared_write_valid && (LsuL1Plugin_logic_shared_write_payload_address == execute_ctrl1_down_LsuL1_MIXED_ADDRESS_lane0[15 : 6]));
+  assign LsuL1Plugin_logic_shared_lsuRead_cmd_payload = execute_ctrl1_down_LsuL1_MIXED_ADDRESS_lane0[14 : 6];
+  assign execute_ctrl1_down_LsuL1Plugin_logic_lsu_rt0_SHARED_BYPASS_VALID_lane0 = (LsuL1Plugin_logic_shared_write_valid && (LsuL1Plugin_logic_shared_write_payload_address == execute_ctrl1_down_LsuL1_MIXED_ADDRESS_lane0[14 : 6]));
   assign execute_ctrl1_down_LsuL1Plugin_logic_lsu_rt0_SHARED_BYPASS_VALUE_lane0_plru_0 = LsuL1Plugin_logic_shared_write_payload_data_plru_0;
   assign execute_ctrl1_down_LsuL1Plugin_logic_lsu_rt0_SHARED_BYPASS_VALUE_lane0_dirty = LsuL1Plugin_logic_shared_write_payload_data_dirty;
   assign LsuL1Plugin_logic_ways_0_lsuRead_cmd_valid = (! execute_freeze_valid);
-  assign LsuL1Plugin_logic_ways_0_lsuRead_cmd_payload = execute_ctrl1_down_LsuL1_MIXED_ADDRESS_lane0[15 : 6];
+  assign LsuL1Plugin_logic_ways_0_lsuRead_cmd_payload = execute_ctrl1_down_LsuL1_MIXED_ADDRESS_lane0[14 : 6];
   assign LsuL1Plugin_logic_ways_1_lsuRead_cmd_valid = (! execute_freeze_valid);
-  assign LsuL1Plugin_logic_ways_1_lsuRead_cmd_payload = execute_ctrl1_down_LsuL1_MIXED_ADDRESS_lane0[15 : 6];
+  assign LsuL1Plugin_logic_ways_1_lsuRead_cmd_payload = execute_ctrl1_down_LsuL1_MIXED_ADDRESS_lane0[14 : 6];
   always @(*) begin
     execute_ctrl2_up_LsuL1Plugin_logic_SHARED_lane0_plru_0 = LsuL1Plugin_logic_shared_lsuRead_rsp_plru_0;
     if(execute_ctrl2_down_LsuL1Plugin_logic_lsu_rt0_SHARED_BYPASS_VALID_lane0) begin
@@ -10977,12 +10977,12 @@ module VexiiRiscv (
   assign execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_loaded = LsuL1Plugin_logic_ways_1_lsuRead_rsp_loaded;
   assign execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_address = LsuL1Plugin_logic_ways_1_lsuRead_rsp_address;
   assign execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_fault = LsuL1Plugin_logic_ways_1_lsuRead_rsp_fault;
-  assign LsuL1Plugin_logic_lsu_sharedBypassers_0_hit = (LsuL1Plugin_logic_shared_write_valid && (LsuL1Plugin_logic_shared_write_payload_address == execute_ctrl2_down_LsuL1_MIXED_ADDRESS_lane0[15 : 6]));
+  assign LsuL1Plugin_logic_lsu_sharedBypassers_0_hit = (LsuL1Plugin_logic_shared_write_valid && (LsuL1Plugin_logic_shared_write_payload_address == execute_ctrl2_down_LsuL1_MIXED_ADDRESS_lane0[14 : 6]));
   assign execute_ctrl2_LsuL1Plugin_logic_SHARED_lane0_bypass_plru_0 = (LsuL1Plugin_logic_lsu_sharedBypassers_0_hit ? LsuL1Plugin_logic_shared_write_payload_data_plru_0 : execute_ctrl2_up_LsuL1Plugin_logic_SHARED_lane0_plru_0);
   assign execute_ctrl2_LsuL1Plugin_logic_SHARED_lane0_bypass_dirty = (LsuL1Plugin_logic_lsu_sharedBypassers_0_hit ? LsuL1Plugin_logic_shared_write_payload_data_dirty : execute_ctrl2_up_LsuL1Plugin_logic_SHARED_lane0_dirty);
   always @(*) begin
-    execute_ctrl2_down_LsuL1Plugin_logic_WAYS_HITS_lane0[0] = (execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_loaded && (execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_address == execute_ctrl2_down_LsuL1_PHYSICAL_ADDRESS_lane0[31 : 16]));
-    execute_ctrl2_down_LsuL1Plugin_logic_WAYS_HITS_lane0[1] = (execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_loaded && (execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_address == execute_ctrl2_down_LsuL1_PHYSICAL_ADDRESS_lane0[31 : 16]));
+    execute_ctrl2_down_LsuL1Plugin_logic_WAYS_HITS_lane0[0] = (execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_loaded && (execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_0_address == execute_ctrl2_down_LsuL1_PHYSICAL_ADDRESS_lane0[31 : 15]));
+    execute_ctrl2_down_LsuL1Plugin_logic_WAYS_HITS_lane0[1] = (execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_loaded && (execute_ctrl2_down_LsuL1Plugin_logic_WAYS_TAGS_lane0_1_address == execute_ctrl2_down_LsuL1_PHYSICAL_ADDRESS_lane0[31 : 15]));
   end
 
   assign execute_ctrl3_down_LsuL1Plugin_logic_WAYS_HIT_lane0 = (|execute_ctrl3_down_LsuL1Plugin_logic_WAYS_HITS_lane0);
@@ -11105,9 +11105,9 @@ module VexiiRiscv (
   end
 
   always @(*) begin
-    LsuL1Plugin_logic_shared_write_payload_address = execute_ctrl3_down_LsuL1_MIXED_ADDRESS_lane0[15 : 6];
+    LsuL1Plugin_logic_shared_write_payload_address = execute_ctrl3_down_LsuL1_MIXED_ADDRESS_lane0[14 : 6];
     if(when_LsuL1Plugin_l1233) begin
-      LsuL1Plugin_logic_shared_write_payload_address = LsuL1Plugin_logic_initializer_counter[9:0];
+      LsuL1Plugin_logic_shared_write_payload_address = LsuL1Plugin_logic_initializer_counter[8:0];
     end
   end
 
@@ -11136,7 +11136,7 @@ module VexiiRiscv (
   assign when_LsuL1Plugin_l1028 = ((execute_ctrl3_down_LsuL1_SEL_lane0 && (! execute_ctrl3_down_LsuL1_HAZARD_lane0)) && (! execute_ctrl3_down_LsuL1_MISS_lane0));
   assign execute_ctrl3_down_LsuL1Plugin_logic_BYPASSED_DATA_lane0 = execute_ctrl3_down_LsuL1Plugin_logic_MUXED_DATA_lane0;
   assign execute_ctrl3_down_LsuL1_READ_DATA_lane0 = execute_ctrl3_down_LsuL1Plugin_logic_BYPASSED_DATA_lane0;
-  assign LsuL1Plugin_logic_initializer_done = LsuL1Plugin_logic_initializer_counter[10];
+  assign LsuL1Plugin_logic_initializer_done = LsuL1Plugin_logic_initializer_counter[9];
   assign when_LsuL1Plugin_l1233 = (! LsuL1Plugin_logic_initializer_done);
   assign _zz_LsuL1Plugin_logic_shared_write_payload_data_plru_0 = 3'b000;
   assign LsuL1Plugin_logic_refill_read_reservation_win = (! 1'b0);
@@ -13486,8 +13486,8 @@ module VexiiRiscv (
   assign LsuPlugin_logic_onAddress0_ls_port_payload_op = LsuL1CmdOpcode_LSU;
   assign LsuPlugin_logic_onAddress0_ls_port_fire = (LsuPlugin_logic_onAddress0_ls_port_valid && LsuPlugin_logic_onAddress0_ls_port_ready);
   assign LsuPlugin_logic_onAddress0_ls_port_payload_storeId = LsuPlugin_logic_onAddress0_ls_storeId;
-  assign LsuPlugin_logic_onAddress0_flush_port_valid = ((LsuPlugin_logic_flusher_stateReg == LsuPlugin_logic_flusher_CMD) && (! LsuPlugin_logic_flusher_cmdCounter[10]));
-  assign LsuPlugin_logic_onAddress0_flush_port_payload_address = {15'd0, _zz_LsuPlugin_logic_onAddress0_flush_port_payload_address};
+  assign LsuPlugin_logic_onAddress0_flush_port_valid = ((LsuPlugin_logic_flusher_stateReg == LsuPlugin_logic_flusher_CMD) && (! LsuPlugin_logic_flusher_cmdCounter[9]));
+  assign LsuPlugin_logic_onAddress0_flush_port_payload_address = {16'd0, _zz_LsuPlugin_logic_onAddress0_flush_port_payload_address};
   assign LsuPlugin_logic_onAddress0_flush_port_payload_size = 2'b00;
   assign LsuPlugin_logic_onAddress0_flush_port_payload_load = 1'b0;
   assign LsuPlugin_logic_onAddress0_flush_port_payload_store = 1'b0;
@@ -14644,7 +14644,7 @@ module VexiiRiscv (
   assign LsuPlugin_pmaBuilder_io_onTransfers_0_addressHit = _zz_LsuPlugin_pmaBuilder_io_onTransfers_0_addressHit[0];
   assign LsuPlugin_pmaBuilder_io_onTransfers_0_argsHit = (|((LsuPlugin_pmaBuilder_io_argsBits & 3'b000) == 3'b000));
   assign LsuPlugin_pmaBuilder_io_onTransfers_0_hit = (LsuPlugin_pmaBuilder_io_onTransfers_0_argsHit && LsuPlugin_pmaBuilder_io_onTransfers_0_addressHit);
-  assign LsuPlugin_logic_onPma_io_rsp_fault = (! ((|{((LsuPlugin_pmaBuilder_io_addressBits & 32'hc0000000) == 32'h40000000),{((LsuPlugin_pmaBuilder_io_addressBits & 32'he0000000) == 32'h20000000),{((LsuPlugin_pmaBuilder_io_addressBits & _zz_LsuPlugin_logic_onPma_io_rsp_fault) == 32'h10000000),((LsuPlugin_pmaBuilder_io_addressBits & _zz_LsuPlugin_logic_onPma_io_rsp_fault_1) == 32'h0)}}}) && (|LsuPlugin_pmaBuilder_io_onTransfers_0_hit)));
+  assign LsuPlugin_logic_onPma_io_rsp_fault = (! ((|{((LsuPlugin_pmaBuilder_io_addressBits & 32'he0000000) == 32'h20000000),{((LsuPlugin_pmaBuilder_io_addressBits & 32'hf0000000) == 32'h40000000),{((LsuPlugin_pmaBuilder_io_addressBits & _zz_LsuPlugin_logic_onPma_io_rsp_fault) == 32'h10000000),((LsuPlugin_pmaBuilder_io_addressBits & _zz_LsuPlugin_logic_onPma_io_rsp_fault_1) == 32'h0)}}}) && (|LsuPlugin_pmaBuilder_io_onTransfers_0_hit)));
   assign LsuPlugin_logic_onPma_io_rsp_io = (! _zz_LsuPlugin_logic_onPma_io_rsp_io[0]);
   assign _zz_execute_ctrl1_up_FpuFlagsWritebackPlugin_logic_FLAGS_lane0_NX = FpuCmpPlugin_logic_ffwb_ats[0];
   assign execute_ctrl1_up_FpuFlagsWritebackPlugin_logic_FLAGS_lane0_NX = (FpuCmpPlugin_logic_ffwb_flags_NX && _zz_execute_ctrl1_up_FpuFlagsWritebackPlugin_logic_FLAGS_lane0_NX);
@@ -18778,7 +18778,7 @@ module VexiiRiscv (
     end
   end
 
-  assign when_LsuPlugin_l368 = (LsuPlugin_logic_flusher_cmdCounter[10] && (! LsuPlugin_logic_flusher_inflight));
+  assign when_LsuPlugin_l368 = (LsuPlugin_logic_flusher_cmdCounter[9] && (! LsuPlugin_logic_flusher_inflight));
   assign when_LsuPlugin_l376 = (! (|LsuPlugin_logic_flusher_waiter));
   assign LsuPlugin_logic_flusher_onExit_IDLE = ((LsuPlugin_logic_flusher_stateNext != LsuPlugin_logic_flusher_IDLE) && (LsuPlugin_logic_flusher_stateReg == LsuPlugin_logic_flusher_IDLE));
   assign LsuPlugin_logic_flusher_onExit_SB_DRAIN = ((LsuPlugin_logic_flusher_stateNext != LsuPlugin_logic_flusher_SB_DRAIN) && (LsuPlugin_logic_flusher_stateReg == LsuPlugin_logic_flusher_SB_DRAIN));
@@ -18998,7 +18998,7 @@ module VexiiRiscv (
       LsuL1Plugin_logic_lsu_rb1_onBanks_1_busyReg <= 1'b0;
       LsuL1Plugin_logic_lsu_ctrl_hazardReg <= 1'b0;
       LsuL1Plugin_logic_lsu_ctrl_flushHazardReg <= 1'b0;
-      LsuL1Plugin_logic_initializer_counter <= 11'h0;
+      LsuL1Plugin_logic_initializer_counter <= 10'h0;
       PrivilegedPlugin_logic_harts_0_privilege <= 3'b011;
       PrivilegedPlugin_logic_harts_0_m_status_mie <= 1'b0;
       PrivilegedPlugin_logic_harts_0_m_status_mpie <= 1'b0;
@@ -19279,7 +19279,7 @@ module VexiiRiscv (
         `endif
       end
       if(when_LsuL1Plugin_l1233) begin
-        LsuL1Plugin_logic_initializer_counter <= (LsuL1Plugin_logic_initializer_counter + 11'h001);
+        LsuL1Plugin_logic_initializer_counter <= (LsuL1Plugin_logic_initializer_counter + 10'h001);
       end
       if(PrivilegedPlugin_logic_harts_0_xretAwayFromMachine) begin
         PrivilegedPlugin_logic_harts_0_m_status_mprv <= 1'b0;
@@ -20339,7 +20339,7 @@ module VexiiRiscv (
       end
     end
     if(LsuPlugin_logic_onAddress0_flush_port_fire) begin
-      LsuPlugin_logic_flusher_cmdCounter <= (LsuPlugin_logic_flusher_cmdCounter + 11'h001);
+      LsuPlugin_logic_flusher_cmdCounter <= (LsuPlugin_logic_flusher_cmdCounter + 10'h001);
     end
     if(LsuPlugin_logic_bus_rsp_toStream_ready) begin
       LsuPlugin_logic_bus_rsp_toStream_rData_error <= LsuPlugin_logic_bus_rsp_toStream_payload_error;
@@ -21147,7 +21147,7 @@ module VexiiRiscv (
         LsuPlugin_logic_flusher_waiter <= (LsuPlugin_logic_flusher_waiter & LsuL1_WRITEBACK_BUSY);
       end
       default : begin
-        LsuPlugin_logic_flusher_cmdCounter <= 11'h0;
+        LsuPlugin_logic_flusher_cmdCounter <= 10'h0;
       end
     endcase
     case(TrapPlugin_logic_harts_0_trap_fsm_stateReg)

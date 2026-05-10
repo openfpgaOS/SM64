@@ -1888,19 +1888,28 @@ void gfx_run(Gfx *commands) {
     dropped_frame = false;
 
 #ifdef TARGET_POCKET
-    term_printf("F%d: DL start\n", tri_diag.frame);
+    uint32_t _t0 = *(volatile uint32_t *)0x40000004;
 #endif
     gfx_rapi->start_frame();
+#ifdef TARGET_POCKET
+    uint32_t _t1 = *(volatile uint32_t *)0x40000004;
+#endif
     gfx_run_dl(commands);
 #ifdef TARGET_POCKET
-    term_printf("F%d: DL done, flushing\n", tri_diag.frame);
+    uint32_t _t2 = *(volatile uint32_t *)0x40000004;
 #endif
     gfx_flush();
 #ifdef TARGET_POCKET
-    term_printf("F%d: flush done\n", tri_diag.frame);
+    uint32_t _t3 = *(volatile uint32_t *)0x40000004;
 #endif
     gfx_rapi->end_frame();
     gfx_wapi->swap_buffers_begin();
+#ifdef TARGET_POCKET
+    uint32_t _t4 = *(volatile uint32_t *)0x40000004;
+    if (tri_diag.frame % 60 == 0)
+        term_printf("PROF clr=%u dl=%u flush=%u swap=%u tot=%u\n",
+            _t1-_t0, _t2-_t1, _t3-_t2, _t4-_t3, _t4-_t0);
+#endif
 }
 
 void gfx_end_frame(void) {

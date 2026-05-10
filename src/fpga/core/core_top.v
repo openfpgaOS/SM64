@@ -494,87 +494,164 @@ wire [31:0] bridge_axi_rd_data;  // Read data from axi_bridge_master
 wire        bridge_axi_rd_done;  // Read done pulse from axi_bridge_master
 
 // ============================================================
-// Z-buffer in physical SRAM chip + Fill Engine + 3-way Arbitration Mux
-// Priority: CPU > Span rasterizer > sram_fill
+// Z-buffer and Framebuffer in dual-port BRAMs
+// Both accessible by CPU (port A) and span rasterizer (port B)
+// FB BRAM port B is dual-clock (clk_video for video scanout)
 // ============================================================
 
-// SRAM controller for physical SRAM chip (z-buffer)
-wire [15:0] sram_dq_out;
-wire [15:0] sram_dq_in;
-wire        sram_dq_oe;
-assign sram_dq    = sram_dq_oe ? sram_dq_out : 16'hZZZZ;
-assign sram_dq_in = sram_dq;
+// Physical SRAM chip unused — tie off
+assign sram_a     = 17'd0;
+assign sram_dq    = 16'hZZZZ;
+assign sram_oe_n  = 1'b1;
+assign sram_we_n  = 1'b1;
+assign sram_ub_n  = 1'b1;
+assign sram_lb_n  = 1'b1;
 
-sram_controller #(.WAIT_CYCLES(5)) sram_zbuf (
-    .clk(clk_ram_controller),
-    .reset_n(reset_n),
-    .word_rd(sram_ctrl_rd),
-    .word_wr(sram_ctrl_wr),
-    .word_addr(sram_ctrl_addr),
-    .word_data(sram_ctrl_wdata),
-    .word_wstrb(sram_ctrl_wstrb),
-    .word_q(sram_ctrl_q),
-    .word_busy(sram_ctrl_busy),
-    .word_q_valid(sram_ctrl_q_valid),
-    .sram_a(sram_a),
-    .sram_dq_out(sram_dq_out),
-    .sram_dq_in(sram_dq_in),
-    .sram_dq_oe(sram_dq_oe),
-    .sram_oe_n(sram_oe_n),
-    .sram_we_n(sram_we_n),
-    .sram_ub_n(sram_ub_n),
-    .sram_lb_n(sram_lb_n)
+// Z-buffer BRAM: 9600 x 32-bit (19200 x 16-bit z-values, 160x120 framebuffer)
+// Port A: CPU + span rasterizer (muxed), clk_cpu
+// span_active mux: span owns port A when busy, CPU owns when idle.
+// span_drain() guarantees no CPU ZB access while span is active.
+wire [13:0] zb_a_addr;
+wire [31:0] zb_a_wdata;
+wire [3:0]  zb_a_wstrb;
+wire [31:0] zb_a_rdata;
+wire        zb_a_wren;
+
+wire [13:0] zb_cpu_addr;
+wire [31:0] zb_cpu_wdata;
+wire [3:0]  zb_cpu_wstrb;
+wire [31:0] zb_cpu_rdata;
+wire        zb_cpu_wren;
+
+wire [13:0] zb_span_addr;
+wire [31:0] zb_span_rdata;
+wire [31:0] zb_span_wdata;
+wire [3:0]  zb_span_wstrb;
+
+altsyncram #(
+    .operation_mode("SINGLE_PORT"),
+    .width_a(32),
+    .widthad_a(14),
+    .numwords_a(9600),
+    .width_byteena_a(4),
+    .lpm_type("altsyncram"),
+    .outdata_reg_a("UNREGISTERED"),
+    .power_up_uninitialized("FALSE")
+) zb_bram (
+    .clock0(clk_cpu),
+    .address_a(zb_a_addr),
+    .data_a(zb_a_wdata),
+    .byteena_a(zb_a_wstrb),
+    .wren_a(zb_a_wren),
+    .q_a(zb_a_rdata),
+    .aclr0(1'b0),
+    .clocken0(1'b1),
+    .addressstall_a(1'b0),
+    .rden_a(1'b1),
+    .eccstatus()
 );
 
-// Z-buffer controller word interface (driven by sram_zbuf above)
-wire        sram_ctrl_rd;
-wire        sram_ctrl_wr;
-wire [21:0] sram_ctrl_addr;
-wire [31:0] sram_ctrl_wdata;
-wire [3:0]  sram_ctrl_wstrb;
-wire [31:0] sram_ctrl_q;
-wire        sram_ctrl_busy;
-wire        sram_ctrl_q_valid;
+// ZB BRAM port A mux: span rasterizer owns port A when active, CPU when idle.
+// span_active declared below with span_rasterizer instantiation; forward-ref is fine.
+// Note: span_active is defined further down — Verilog allows forward references for wires.
+wire span_zb_mux;  // forward declaration, assigned after span_rasterizer instantiation
 
-// CPU SRAM interface (from axi_periph_slave)
-wire        cpu_sram_rd;
-wire        cpu_sram_wr;
-wire [21:0] cpu_sram_addr;
-wire [31:0] cpu_sram_wdata;
-wire [3:0]  cpu_sram_wstrb;
-wire        cpu_sram_busy;
-wire [31:0] cpu_sram_q;
-wire        cpu_sram_q_valid;
+assign zb_a_addr  = span_zb_mux ? zb_span_addr  : zb_cpu_addr;
+assign zb_a_wdata = span_zb_mux ? zb_span_wdata : zb_cpu_wdata;
+assign zb_a_wstrb = span_zb_mux ? zb_span_wstrb : zb_cpu_wstrb;
+assign zb_a_wren  = span_zb_mux ? (|zb_span_wstrb) : zb_cpu_wren;
+assign zb_cpu_rdata  = zb_a_rdata;
+assign zb_span_rdata = zb_a_rdata;
 
-// CPU-only SRAM connection (no span rasterizer or sram_fill)
-assign sram_ctrl_rd    = cpu_sram_rd;
-assign sram_ctrl_wr    = cpu_sram_wr;
-assign sram_ctrl_addr  = cpu_sram_addr;
-assign sram_ctrl_wdata = cpu_sram_wdata;
-assign sram_ctrl_wstrb = cpu_sram_wstrb;
-assign cpu_sram_busy   = sram_ctrl_busy;
-assign cpu_sram_q      = sram_ctrl_q;
-assign cpu_sram_q_valid = sram_ctrl_q_valid;
+// Framebuffer BRAM: 9600 x 32-bit — double-buffered (2 x 4800 words)
+// Page 0: words 0..4799, Page 1: words 4800..9599
+// CPU/span write to draw page, video scanout reads display page.
+// Port A: CPU + span rasterizer (muxed), clk_cpu
+// Port B: video scanout (read-only), clk_video
+wire [13:0] fb_a_addr;
+wire [31:0] fb_a_wdata;
+wire [3:0]  fb_a_wstrb;
+wire [31:0] fb_a_rdata;
+wire        fb_a_wren;
 
-// SDRAM fill engine AXI4 master signals (to arbiter M2)
-wire        fill_m_awvalid, fill_m_awready;
-wire [31:0] fill_m_awaddr;
-wire [7:0]  fill_m_awlen;
-wire        fill_m_wvalid, fill_m_wready;
-wire [31:0] fill_m_wdata;
-wire [3:0]  fill_m_wstrb;
-wire        fill_m_wlast;
-wire        fill_m_bvalid;
-wire [1:0]  fill_m_bresp;
-wire        fill_m_arvalid;
-wire [31:0] fill_m_araddr;
-wire [7:0]  fill_m_arlen;
+wire [13:0] fb_b_addr;     // from video_scanout_bram (+ display page offset)
+wire [31:0] fb_b_rdata;    // to video_scanout_bram
 
-// Fill engine register interface (from axi_periph_slave)
-wire        fill_reg_wr;
-wire [4:0]  fill_reg_addr;
-wire [31:0] fill_reg_wdata;
-wire [31:0] fill_reg_rdata;
+// CPU FB BRAM interface (from axi_periph_slave)
+wire [12:0] fb_cpu_addr;
+wire [31:0] fb_cpu_wdata;
+wire [3:0]  fb_cpu_wstrb;
+wire [31:0] fb_cpu_rdata;
+wire        fb_cpu_wren;
+
+// Span rasterizer FB BRAM interface
+wire [12:0] fb_span_addr;
+wire [31:0] fb_span_rdata;
+wire [31:0] fb_span_wdata;
+wire [3:0]  fb_span_wstrb;
+
+// Span rasterizer signals
+wire span_active;
+assign span_zb_mux = span_active;  // span owns ZB port A when busy
+
+// Span writing: 1-cycle pulse when span rasterizer writes a pixel to FB BRAM.
+// Only mux port A during the actual write, not the entire processing duration.
+wire span_writing = |fb_span_wstrb;
+
+// Double-buffer page control (from axi_periph_slave)
+wire fb_draw_page;  // 0 or 1: which page CPU/span are rendering to
+
+// Mux: span rasterizer gets FB port A only during its 1-cycle pixel write.
+// CPU has port A the rest of the time (~18 out of 19 cycles).
+// axi_periph_slave retries CPU FB writes that collide with span writes.
+wire [12:0] fb_a_addr_raw = span_writing ? fb_span_addr  : fb_cpu_addr;
+assign fb_a_addr  = fb_draw_page ? ({1'b0, fb_a_addr_raw} + 14'd4800) : {1'b0, fb_a_addr_raw};
+assign fb_a_wdata = span_writing ? fb_span_wdata : fb_cpu_wdata;
+assign fb_a_wstrb = span_writing ? fb_span_wstrb : fb_cpu_wstrb;
+assign fb_a_wren  = span_writing ? 1'b1 : fb_cpu_wren;
+assign fb_cpu_rdata  = fb_a_rdata;
+assign fb_span_rdata = fb_a_rdata;
+
+altsyncram #(
+    .operation_mode("BIDIR_DUAL_PORT"),
+    .width_a(32),
+    .widthad_a(14),
+    .numwords_a(9600),
+    .width_byteena_a(4),
+    .width_b(32),
+    .widthad_b(14),
+    .numwords_b(9600),
+    .width_byteena_b(4),
+    .lpm_type("altsyncram"),
+    .outdata_reg_a("UNREGISTERED"),
+    .outdata_reg_b("UNREGISTERED"),
+    .power_up_uninitialized("TRUE")
+) fb_bram (
+    .clock0(clk_cpu),
+    .address_a(fb_a_addr),
+    .data_a(fb_a_wdata),
+    .byteena_a(fb_a_wstrb),
+    .wren_a(fb_a_wren),
+    .q_a(fb_a_rdata),
+    .clock1(clk_core_12288),
+    .address_b(fb_b_addr),
+    .data_b(32'd0),
+    .byteena_b(4'b1111),
+    .wren_b(1'b0),
+    .q_b(fb_b_rdata),
+    .aclr0(1'b0), .aclr1(1'b0),
+    .clocken0(1'b1), .clocken1(1'b1),
+    .clocken2(1'b1), .clocken3(1'b1),
+    .addressstall_a(1'b0), .addressstall_b(1'b0),
+    .rden_a(1'b1), .rden_b(1'b1),
+    .eccstatus()
+);
+
+// Span rasterizer register interface (from axi_periph_slave)
+wire        span_reg_wr;
+wire [12:0] span_reg_addr;
+wire [31:0] span_reg_wdata;
+wire [31:0] span_reg_rdata;
 
 assign dbg_tx = 1'bZ;
 assign user1 = 1'bZ;
@@ -1384,6 +1461,7 @@ assign video_hs = vidout_hs;
         // Display control
         .display_mode(display_mode),
         .fb_display_addr(fb_display_addr),
+        .fb_draw_page(fb_draw_page),
         // Palette write interface
         .pal_wr(cpu_pal_wr),
         .pal_addr(cpu_pal_addr),
@@ -1409,20 +1487,23 @@ assign video_hs = vidout_hs;
         .link_reg_addr(link_reg_addr),
         .link_reg_wdata(link_reg_wdata),
         .link_reg_rdata(link_reg_rdata),
-        // SRAM word interface (CPU z-buffer access)
-        .cpu_sram_rd(cpu_sram_rd),
-        .cpu_sram_wr(cpu_sram_wr),
-        .cpu_sram_addr(cpu_sram_addr),
-        .cpu_sram_wdata(cpu_sram_wdata),
-        .cpu_sram_wstrb(cpu_sram_wstrb),
-        .cpu_sram_busy(cpu_sram_busy),
-        .cpu_sram_q(cpu_sram_q),
-        .cpu_sram_q_valid(cpu_sram_q_valid),
+        // Z-buffer BRAM interface (CPU access via port A)
+        .zb_bram_addr(zb_cpu_addr),
+        .zb_bram_wdata(zb_cpu_wdata),
+        .zb_bram_wstrb(zb_cpu_wstrb),
+        .zb_bram_rdata(zb_cpu_rdata),
+        .zb_bram_wren(zb_cpu_wren),
+        // Framebuffer BRAM interface (CPU access via port A mux)
+        .fb_bram_addr(fb_cpu_addr),
+        .fb_bram_wdata(fb_cpu_wdata),
+        .fb_bram_wstrb(fb_cpu_wstrb),
+        .fb_bram_rdata(fb_cpu_rdata),
+        .fb_bram_wren(fb_cpu_wren),
 
-        .fill_reg_wr(fill_reg_wr),
-        .fill_reg_addr(fill_reg_addr),
-        .fill_reg_wdata(fill_reg_wdata),
-        .fill_reg_rdata(fill_reg_rdata)
+        .span_reg_wr(span_reg_wr),
+        .span_reg_addr(span_reg_addr),
+        .span_reg_wdata(span_reg_wdata),
+        .span_reg_rdata(span_reg_rdata)
     );
 
     // Slave → io_sdram pulse adapter: axi_sdram_slave holds rd/wr high until
@@ -1506,26 +1587,26 @@ assign video_hs = vidout_hs;
         .m1_wdata(bridge_m_wdata),     .m1_wstrb(bridge_m_wstrb),
         .m1_wlast(bridge_m_wlast),
         .m1_bvalid(bridge_m_bvalid),   .m1_bresp(bridge_m_bresp),
-        // M2: SDRAM Fill Engine
-        .m2_arvalid(fill_m_arvalid), .m2_arready(),
-        .m2_araddr(fill_m_araddr),   .m2_arlen(fill_m_arlen),
+        // M2: Unused (was SDRAM fill engine)
+        .m2_arvalid(1'b0), .m2_arready(),
+        .m2_araddr(32'd0), .m2_arlen(8'd0),
         .m2_rvalid(),   .m2_rdata(),
         .m2_rresp(),     .m2_rlast(),
-        .m2_awvalid(fill_m_awvalid), .m2_awready(fill_m_awready),
-        .m2_awaddr(fill_m_awaddr),   .m2_awlen(fill_m_awlen),
-        .m2_wvalid(fill_m_wvalid),   .m2_wready(fill_m_wready),
-        .m2_wdata(fill_m_wdata),     .m2_wstrb(fill_m_wstrb),
-        .m2_wlast(fill_m_wlast),
-        .m2_bvalid(fill_m_bvalid),   .m2_bresp(fill_m_bresp),
-        // M3: Unused (tie off)
+        .m2_awvalid(1'b0), .m2_awready(),
+        .m2_awaddr(32'd0), .m2_awlen(8'd0),
+        .m2_wvalid(1'b0),  .m2_wready(),
+        .m2_wdata(32'd0),  .m2_wstrb(4'd0),
+        .m2_wlast(1'b0),
+        .m2_bvalid(),   .m2_bresp(),
+        // M3: Unused (was span rasterizer)
         .m3_arvalid(1'b0), .m3_arready(),
-        .m3_araddr(32'd0),   .m3_arlen(8'd0),
+        .m3_araddr(32'd0), .m3_arlen(8'd0),
         .m3_rvalid(),   .m3_rdata(),
         .m3_rresp(),     .m3_rlast(),
         .m3_awvalid(1'b0), .m3_awready(),
-        .m3_awaddr(32'd0),   .m3_awlen(8'd0),
-        .m3_wvalid(1'b0),   .m3_wready(),
-        .m3_wdata(32'd0),     .m3_wstrb(4'd0),
+        .m3_awaddr(32'd0), .m3_awlen(8'd0),
+        .m3_wvalid(1'b0),  .m3_wready(),
+        .m3_wdata(32'd0),  .m3_wstrb(4'd0),
         .m3_wlast(1'b0),
         .m3_bvalid(),   .m3_bresp(),
         // Slave output (to axi_sdram_slave)
@@ -1541,29 +1622,25 @@ assign video_hs = vidout_hs;
         .s_bvalid(arb_s_bvalid),   .s_bresp(arb_s_bresp)
     );
 
-    // SDRAM fill engine: DMA fill via AXI4 arbiter M2
-    sdram_fill_axi sdram_fill (
+    // Span rasterizer: hardware pixel pipeline with direct BRAM access
+    span_rasterizer span_rast (
         .clk(clk_cpu),
         .reset_n(reset_n),
-        .reg_wr(fill_reg_wr),
-        .reg_addr(fill_reg_addr),
-        .reg_wdata(fill_reg_wdata),
-        .reg_rdata(fill_reg_rdata),
-        .m_awvalid(fill_m_awvalid),
-        .m_awready(fill_m_awready),
-        .m_awaddr(fill_m_awaddr),
-        .m_awlen(fill_m_awlen),
-        .m_wvalid(fill_m_wvalid),
-        .m_wready(fill_m_wready),
-        .m_wdata(fill_m_wdata),
-        .m_wstrb(fill_m_wstrb),
-        .m_wlast(fill_m_wlast),
-        .m_bvalid(fill_m_bvalid),
-        .m_bresp(fill_m_bresp),
-        .m_arvalid(fill_m_arvalid),
-        .m_araddr(fill_m_araddr),
-        .m_arlen(fill_m_arlen),
-        .active()
+        .reg_wr(span_reg_wr),
+        .reg_addr(span_reg_addr),
+        .reg_wdata(span_reg_wdata),
+        .reg_rdata(span_reg_rdata),
+        // Z-buffer BRAM port A (muxed with CPU via span_active)
+        .zb_bram_addr(zb_span_addr),
+        .zb_bram_rdata(zb_span_rdata),
+        .zb_bram_wdata(zb_span_wdata),
+        .zb_bram_wstrb(zb_span_wstrb),
+        // Framebuffer BRAM port A (muxed with CPU)
+        .fb_bram_addr(fb_span_addr),
+        .fb_bram_rdata(fb_span_rdata),
+        .fb_bram_wdata(fb_span_wdata),
+        .fb_bram_wstrb(fb_span_wstrb),
+        .active(span_active)
     );
 
     // AXI4 slave wrapper: arbiter output → SDRAM word-level → io_sdram (direct)
@@ -1675,38 +1752,22 @@ assign video_hs = vidout_hs;
     wire [7:0]  cpu_pal_addr;
     wire [23:0] cpu_pal_data;
 
-    // SDRAM burst interface signals for video scanout
-    wire        video_burst_rd;
-    wire [24:0] video_burst_addr;
-    wire [10:0] video_burst_len;
-    wire        video_burst_32bit;
-    wire [31:0] video_burst_data;
-    wire        video_burst_data_valid;
-    wire        video_burst_data_done;
-
-    video_scanout_indexed scanout (
-        // Video clock domain (12.288 MHz)
+    // Video scanout from BRAM framebuffer with 2x upscale (160x120 → 320x240)
+    video_scanout_bram scanout (
         .clk_video(clk_core_12288),
         .reset_n(reset_n),
         .x_count(x_count),
         .y_count(y_count),
-        .line_start(line_start),
         .pixel_color(framebuffer_pixel_color),
-        .fb_base_addr(fb_display_addr),  // 25-bit SDRAM 16-bit word address
-        // SDRAM clock domain (100 MHz)
-        .clk_sdram(clk_ram_controller),
-        // SDRAM burst read interface
-        .burst_rd(video_burst_rd),
-        .burst_addr(video_burst_addr),
-        .burst_len(video_burst_len),
-        .burst_32bit(video_burst_32bit),
-        .burst_data(video_burst_data),
-        .burst_data_valid(video_burst_data_valid),
-        .burst_data_done(video_burst_data_done),
-        // Palette write interface (from CPU, same clock as SDRAM)
+        // FB BRAM port B (read-only, clocked at clk_video)
+        .fb_rd_addr(fb_b_addr),
+        .fb_rd_data(fb_b_rdata),
+        .fb_display_page(~fb_draw_page),  // Display page = opposite of draw page
+        // Palette write interface (from CPU via clk_cpu)
         .pal_wr(cpu_pal_wr),
         .pal_addr(cpu_pal_addr),
-        .pal_data(cpu_pal_data)
+        .pal_data(cpu_pal_data),
+        .pal_clk(clk_cpu)
     );
 
 always @(posedge clk_core_12288 or negedge reset_n) begin
@@ -1759,12 +1820,13 @@ always @(posedge clk_core_12288 or negedge reset_n) begin
                 // data enable. this is the active region of the line
                 vidout_de <= 1;
 
-                // Display mode: 0=terminal overlay, 1=framebuffer only
+                // Both modes: white terminal text overlays framebuffer
                 if (display_mode) begin
-                    // Framebuffer only mode
-                    vidout_rgb <= framebuffer_pixel_color;
+                    if (terminal_pixel_color == 24'hFFFFFF)
+                        vidout_rgb <= terminal_pixel_color;
+                    else
+                        vidout_rgb <= framebuffer_pixel_color;
                 end else begin
-                    // Terminal overlay mode - white text overlays framebuffer
                     if (terminal_pixel_color == 24'hFFFFFF)
                         vidout_rgb <= terminal_pixel_color;
                     else
@@ -1889,14 +1951,14 @@ io_sdram isr0 (
     .phy_dq         ( dram_dq ),
     .phy_dqm        ( dram_dqm ),
 
-    // Burst interface - used for video scanout
-    .burst_rd           ( video_burst_rd ),
-    .burst_addr         ( video_burst_addr ),
-    .burst_len          ( video_burst_len ),
-    .burst_32bit        ( video_burst_32bit ),
-    .burst_data         ( video_burst_data ),
-    .burst_data_valid   ( video_burst_data_valid ),
-    .burst_data_done    ( video_burst_data_done ),
+    // Burst interface - unused (video scanout now reads from BRAM)
+    .burst_rd           ( 1'b0 ),
+    .burst_addr         ( 25'b0 ),
+    .burst_len          ( 11'b0 ),
+    .burst_32bit        ( 1'b0 ),
+    .burst_data         ( ),
+    .burst_data_valid   ( ),
+    .burst_data_done    ( ),
 
     // Burst write interface - not used
     .burstwr        ( 1'b0 ),

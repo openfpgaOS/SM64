@@ -5,5 +5,8 @@
 
 extern struct GfxRenderingAPI gfx_soft_api;
 extern uint32_t *gfx_output;
+#ifdef TARGET_POCKET
+extern uint8_t *fb_cache;
+#endif
 
 #endif

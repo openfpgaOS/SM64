@@ -88,8 +88,15 @@ void send_display_list(struct SPTask *spTask) {
 
 
 void produce_one_frame(void) {
+#ifdef TARGET_POCKET
+    static int _pf_cnt = 0;
+    uint32_t _pf0 = *(volatile uint32_t *)0x40000004;
+#endif
     gfx_start_frame();
     game_loop_one_iteration();
+#ifdef TARGET_POCKET
+    uint32_t _pf1 = *(volatile uint32_t *)0x40000004;
+#endif
 
     if (configEnableSound) {
         int samples_left = audio_api->buffered();
@@ -101,7 +108,18 @@ void produce_one_frame(void) {
         audio_api->play((u8 *)audio_buffer, 2 * num_audio_samples * 4);
     }
 
+#ifdef TARGET_POCKET
+    uint32_t _pf2 = *(volatile uint32_t *)0x40000004;
+#endif
     gfx_end_frame();
+#ifdef TARGET_POCKET
+    uint32_t _pf3 = *(volatile uint32_t *)0x40000004;
+    if (++_pf_cnt % 60 == 0) {
+        extern void term_printf(const char *fmt, ...);
+        term_printf("FRAME game=%u audio=%u gfx_end=%u total=%u (%u ms)\n",
+            _pf1-_pf0, _pf2-_pf1, _pf3-_pf2, _pf3-_pf0, (_pf3-_pf0)/110000);
+    }
+#endif
 }
 
 #ifdef TARGET_WEB
