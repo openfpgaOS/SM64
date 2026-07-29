@@ -161,7 +161,7 @@ struct ShaderProgram {
 };
 
 static struct GTex   g_tex[MAX_TEX];
-static int           g_tex_count;
+static uint32_t      g_tex_count;
 static struct GTex  *g_cur_tex[2];
 static int           g_cur_tmu;
 
@@ -179,6 +179,9 @@ static uint32_t      g_draw_fb;
 static int           g_fb_active;
 static int           g_has_gpu;
 static int           g_truecolor;       /* RGB565 direct-color path (OF_HW_GPU_VCOLOR) */
+static int           g_combine;         /* full texel*C+D combiner (OF_HW_GPU_COMBINE);
+                                         * 0 on the lean os30 (EXCLUDE_COMBINE) -> HILITE
+                                         * surfaces fall back to plain texel*shade */
 static int           g_fb_bpp = 1;      /* framebuffer bytes/pixel (1 CI8, 2 RGB565) */
 static uint16_t      g_white_tex;       /* 1x1 white RGB565 for untextured truecolor */
 static uint32_t      g_white_addr;
@@ -227,6 +230,11 @@ void gfx_gpu_boot(void) {
                 of_has_feature(OF_HW_GPU_VERT_TRI);
     /* Truecolor (RGB565 direct color) when the os30 GPU advertises it. */
     g_truecolor = g_has_gpu && of_has_feature(OF_HW_GPU_VCOLOR);
+    /* Full texel*C+D combiner (HILITE/specular).  The lean os30 (EXCLUDE_COMBINE)
+     * does NOT advertise it -> g_combine 0 -> classify_combine_cd is never engaged
+     * (cd_on stays 0) so HILITE surfaces emit plain RGB565 texel*shade instead of
+     * the biased-C/D payload the gated GPU would mis-read. */
+    g_combine = g_truecolor && of_has_feature(OF_HW_GPU_COMBINE);
     /* Always set the RGB332 palette: harmless under RGB565 scanout (ignored),
      * and the safety net if the RGB565 mode switch is rejected below. */
     build_palette();
@@ -249,6 +257,18 @@ void gfx_gpu_boot(void) {
             if (cur.color_mode == OF_VIDEO_MODE_RGB565) {
                 g_fb_bpp = 2;
                 g_white_tex = 0xFFFF;   /* 1x1 white texel for untextured tris */
+                /* The GPU DMA-fetches this texel straight from SDRAM.  A ONE-TIME
+                 * cbo.flush at init is writeback-timing-fragile (cache.c documents
+                 * that cbo.flush does not wait for the d_axi writeback to reach DRAM;
+                 * real textures survive only because they are re-flushed on every
+                 * gameplay upload).  When the init writeback didn't land, the GPU read
+                 * 0x0000 -> rgb565_gouraud(black, shade) = a BLACK untextured-truecolor
+                 * surface: the SM64 Goddard head's MAIN FACE (G_CC_SHADE) rendered
+                 * black while the textured shine (G_CC_HILITERGBA) still drew its sheen
+                 * = "almost black head with some sheen".  Write the texel through the
+                 * UNCACHED SDRAM alias so DRAM is guaranteed white before the first
+                 * fetch — the reliable path cache.c prescribes for HW-read buffers. */
+                *(volatile uint16_t *)of_uncached(&g_white_tex) = 0xFFFF;
                 of_cache_flush_range(&g_white_tex, sizeof(g_white_tex));
                 g_white_addr = (uint32_t)(uintptr_t)&g_white_tex;
             } else {
@@ -277,6 +297,32 @@ void gfx_gpu_boot(void) {
     }
 }
 
+#ifdef TARGET_OPENFPGA
+/* One-shot FB-dump instrumentation (translucency-stripes investigation).
+ * At frame 250 (the intro letter is on screen), wait for the just-submitted
+ * frame to FULLY render (fence token), then write its raw RGB565 bytes to
+ * the nonvolatile file "sm64_9.sav" — save slot 19, already DECLARED and
+ * bound by the instance json (Assets/sm64/ThinkElastic.SM64/sm64.json);
+ * on the Pocket a file only reaches SD through a data slot.  This
+ * exfiltrates the REAL framebuffer: stripes present in the dump = the
+ * corruption is in memory (and the exact bytes fingerprint the mechanism);
+ * dump clean while the screen stripes = display-path effect.  The close
+ * write-through (sys_close -> nvslot flush) persists immediately — no
+ * clean exit required.  Remove after the investigation. */
+#include <stdio.h>
+static uint32_t of_fbdump_frames;
+static void of_fbdump(const void *fb, uint32_t token, int slot) {
+    static const char *names[5] = { "sm64_5.sav", "sm64_6.sav", "sm64_7.sav",
+                                    "sm64_8.sav", "sm64_9.sav" };
+    of_gpu_wait(token);
+    FILE *fp = fopen(names[slot], "wb");
+    if (!fp) return;
+    fwrite(of_uncached((void *)(uintptr_t)fb), 1,
+           (size_t)SCR_W * SCR_H * 2, fp);
+    fclose(fp);
+}
+#endif
+
 void gfx_gpu_present(void) {
     if (!g_has_gpu) {
         of_video_flip();
@@ -284,6 +330,16 @@ void gfx_gpu_present(void) {
     }
     uint32_t token = of_gpu_flip_to(g_draw_idx);
     of_gpu_kick();
+#ifdef TARGET_OPENFPGA
+    /* Rotating dump: every 300 frames forever, cycling save slots 15-19
+     * (sm64_5..9.sav) — the card always ends up holding the LAST five
+     * captures (~last 100 s of play), so any run that reaches a striped
+     * scene and lingers ~20 s leaves its framebuffer on the card. */
+    ++of_fbdump_frames;
+    if (of_fbdump_frames >= 250 && (of_fbdump_frames - 250) % 300 == 0)
+        of_fbdump(of_video_buffer_addr(g_draw_idx), token,
+                  (int)(((of_fbdump_frames - 250) / 300) % 5));
+#endif
     g_draw_idx = of_video_acquire_next(g_draw_idx, token);
     g_draw_fb = (uint32_t)(uintptr_t)of_video_buffer_addr(g_draw_idx);
     if (!g_fb_active) {
@@ -340,15 +396,43 @@ static bool gpu_z_is_from_0_to_1(void) { return true; }
  * ================================================================ */
 
 static uint32_t gpu_new_texture(void) {
-    int id = g_tex_count++;
-    if (id >= MAX_TEX) id = MAX_TEX - 1;
-    return (uint32_t)id;
+    /* Recycle ids modulo the pool instead of saturating.  gfx_pc calls
+     * new_texture() on EVERY import — and on pool overflow (512 nodes) it
+     * wraps pool_pos, implicitly invalidating every id it ever handed out —
+     * so ids are minted unboundedly.  The old `id = MAX_TEX-1` saturation
+     * aliased ALL imports after the 4096th into ONE mutually-overwriting
+     * slot: the "same texture repeated across character parts" artifact
+     * (world textures import early and keep unique slots; churny character
+     * part-textures live in the re-import storm and all landed on slot 4095).
+     * Modulo reuse is safe: at most 512 ids are live at once (the gfx_pc
+     * pool), so a recycled id is >= 8 pool-generations dead; in-flight GPU
+     * reads of a recycled slot are covered by the per-slot double buffer
+     * (the next upload writes the OTHER half). */
+    uint32_t id = g_tex_count++ % MAX_TEX;
+    return id;
 }
 
 static void gpu_select_texture(int tile, uint32_t texture_id) {
     if (texture_id >= MAX_TEX) texture_id = MAX_TEX - 1;
     g_cur_tmu = tile & 1;
     g_cur_tex[g_cur_tmu] = &g_tex[texture_id];
+}
+
+/* One RGBA32 source pixel -> GPU texel.  a<0x80 -> 0 transparent (SKIP_ZERO);
+ * in 565 an opaque true-black texel is nudged to 0x0008 so it can't collide
+ * with the transparent key. */
+static inline uint16_t tex565_texel(const uint8_t *rgba32, uint32_t i) {
+    uint8_t r = rgba32[i * 4 + 0], g = rgba32[i * 4 + 1];
+    uint8_t b = rgba32[i * 4 + 2], a = rgba32[i * 4 + 3];
+    uint16_t c = (a < 0x80) ? 0x0000 : rgba_to_565(r, g, b);
+    if (a >= 0x80 && c == 0x0000) c = 0x0008;
+    return c;
+}
+
+static inline uint8_t tex332_texel(const uint8_t *rgba32, uint32_t i) {
+    uint8_t r = rgba32[i * 4 + 0], g = rgba32[i * 4 + 1];
+    uint8_t b = rgba32[i * 4 + 2], a = rgba32[i * 4 + 3];
+    return (a < 0x80) ? 0 : rgb332(r, g, b);
 }
 
 static void gpu_upload_texture(const uint8_t *rgba32, int width, int height) {
@@ -374,23 +458,40 @@ static void gpu_upload_texture(const uint8_t *rgba32, int width, int height) {
     }
     t->cur = slotc;
     t->ci8 = t->slot[slotc];
+    /* Clean any dirty CACHED lines for this buffer FIRST (heap reuse can
+     * leave them; a later eviction would clobber what we write below), then
+     * store the texels through the UNCACHED SDRAM alias.  cbo.flush alone is
+     * not durable — cache.c documents that it does not wait for the d_axi
+     * writeback to reach DRAM — and the GPU fetches these texels
+     * asynchronously as soon as the next triangle batch issues.  Losing that
+     * race samples the buffer's PREVIOUS contents: another texture on
+     * character parts (the "texture repeating across surfaces" artifact —
+     * character part-textures are re-imported and drawn within microseconds,
+     * world textures upload once and had ages to drain).  Uncached stores
+     * are the reliable path cache.c prescribes for HW-read buffers (see the
+     * white-tex init above); word-packed to cut the transaction count. */
+    of_cache_flush_range(t->ci8, bytes);
     if (g_truecolor) {
-        uint16_t *px = (uint16_t *)t->ci8;
-        for (uint32_t i = 0; i < n; i++) {
-            uint8_t r = rgba32[i * 4 + 0], g = rgba32[i * 4 + 1];
-            uint8_t b = rgba32[i * 4 + 2], a = rgba32[i * 4 + 3];
-            /* a<0x80 -> 0x0000 transparent (SKIP_ZERO).  Avoid a true black
-             * opaque texel colliding with transparent by nudging to 0x0008. */
-            uint16_t c = (a < 0x80) ? 0x0000 : rgba_to_565(r, g, b);
-            if (a >= 0x80 && c == 0x0000) c = 0x0008;
-            px[i] = c;
+        volatile uint32_t *dw = (volatile uint32_t *)of_uncached(t->ci8);
+        uint32_t i = 0;
+        for (; i + 1 < n; i += 2) {
+            uint16_t c0 = tex565_texel(rgba32, i);
+            uint16_t c1 = tex565_texel(rgba32, i + 1);
+            dw[i >> 1] = (uint32_t)c0 | ((uint32_t)c1 << 16);
         }
+        if (i < n)
+            ((volatile uint16_t *)dw)[i] = tex565_texel(rgba32, i);
     } else {
-        for (uint32_t i = 0; i < n; i++) {
-            uint8_t r = rgba32[i * 4 + 0], g = rgba32[i * 4 + 1];
-            uint8_t b = rgba32[i * 4 + 2], a = rgba32[i * 4 + 3];
-            t->ci8[i] = (a < 0x80) ? 0 : rgb332(r, g, b);
+        volatile uint32_t *dw = (volatile uint32_t *)of_uncached(t->ci8);
+        uint32_t i = 0;
+        for (; i + 3 < n; i += 4) {
+            dw[i >> 2] = (uint32_t)tex332_texel(rgba32, i)
+                       | ((uint32_t)tex332_texel(rgba32, i + 1) << 8)
+                       | ((uint32_t)tex332_texel(rgba32, i + 2) << 16)
+                       | ((uint32_t)tex332_texel(rgba32, i + 3) << 24);
         }
+        for (; i < n; i++)
+            ((volatile uint8_t *)dw)[i] = tex332_texel(rgba32, i);
     }
     t->w = (uint16_t)width;
     t->h = (uint16_t)height;
@@ -403,7 +504,8 @@ static void gpu_upload_texture(const uint8_t *rgba32, int width, int height) {
     t->wmask = ((width  & (width  - 1)) == 0) ? (uint16_t)(width  - 1) : 0xFFFF;
     t->hmask = ((height & (height - 1)) == 0) ? (uint16_t)(height - 1) : 0xFFFF;
     t->addr = (uint32_t)(uintptr_t)t->ci8;
-    of_cache_flush_range(t->ci8, bytes);
+    /* No trailing flush: texels went to DRAM via the uncached alias above,
+     * and flushing here would only re-write-back stale (clean) lines. */
 }
 
 static void gpu_set_sampler_parameters(int tile, bool linear, uint32_t cms,
@@ -558,6 +660,73 @@ static unsigned g_cd_fallbacks;      /* combiners that didn't fit texel*C+D */
 static int      g_cd_active;         /* set by gpu_draw_triangles for emit_tri_state */
 static int      g_subpix_tri;        /* 1 = 3D vert-tri sends Q12.4 subpixel Y (control bit 31) */
 
+#ifdef TARGET_OPENFPGA
+/* ---- Texture-fill eviction model (CPU-only decision instrumentation) --------
+ * Q: would reordering the draw stream by texture cut GPU texture-cache misses
+ * enough to justify a re-sort?  Models the os30 16 KB tex cache as a fully-
+ * associative LRU over the real-texture (re)bind sequence the GPU actually sees.
+ * FA-LRU over-counts hits vs the true direct-mapped cache, so the result is an
+ * OPTIMISTIC ceiling on what any re-sort could recover.  Per frame:
+ *   binds     = real-texture (re)binds (tex_addr changed; tiny white/ramp ignored)
+ *   distinct  = first-touches = the COMPULSORY working set (paid regardless of order)
+ *   removable = re-binds whose texture was EVICTED since last use (reuse-distance
+ *               footprint > 16 KB): a current MISS that clustering turns into a hit
+ *               = the refetch a re-sort can remove.  removable/binds = THE ceiling.
+ *   resident  = re-binds still cache-hot (sorting wins nothing there)
+ *   ws_kb     = sum of distinct footprints (confirm the 40-160 KB >> 16 KB picture)
+ * Footprint = full w*h*bpp (a triangle may sample only part of a texture), so the
+ * removable count is an UPPER bound.  Scope is per-frame: only intra-frame
+ * reordering is in question (a re-sort can't cross the frame boundary). */
+#define EV_CACHE_BYTES 16384u
+#define EV_MRU_MAX     96    /* recent-tex window; >>16 KB of footprint -> resident set always inside it */
+#define EV_SEEN_MAX    512   /* distinct tex/frame (heavy ~99); matches the gfx_pc 512-entry pool */
+
+static uint32_t ev_mru_addr[EV_MRU_MAX], ev_mru_bytes[EV_MRU_MAX];
+static int      ev_mru_n;
+static uint32_t ev_seen[EV_SEEN_MAX];
+static int      ev_seen_n;
+static uint32_t ev_last_tex_addr = 0xFFFFFFFFu;
+static uint32_t ev_binds, ev_distinct, ev_resident, ev_removable, ev_ws_bytes, ev_seen_ovf;
+
+static void ev_note_bind(uint32_t addr, uint32_t bytes) {
+    int i, pos;
+    ev_binds++;
+
+    /* First touch this frame -> compulsory working-set fill (not removable). */
+    for (i = 0; i < ev_seen_n; i++)
+        if (ev_seen[i] == addr) break;
+    if (i == ev_seen_n) {
+        if (ev_seen_n < EV_SEEN_MAX) ev_seen[ev_seen_n++] = addr; else ev_seen_ovf++;
+        ev_distinct++;
+        ev_ws_bytes += bytes;
+    } else {
+        /* Re-bind: reuse distance = footprint of textures touched since its last
+         * bind.  > cache => it was evicted (clustering would have kept it). */
+        uint32_t dist = 0;
+        for (pos = 0; pos < ev_mru_n; pos++) {
+            if (ev_mru_addr[pos] == addr) break;
+            dist += ev_mru_bytes[pos];
+        }
+        if (pos == ev_mru_n || dist > EV_CACHE_BYTES) ev_removable++;
+        else                                          ev_resident++;
+    }
+
+    /* Move addr to MRU front (evict the LRU tail when the window is full). */
+    for (pos = 0; pos < ev_mru_n; pos++)
+        if (ev_mru_addr[pos] == addr) break;
+    if (pos == ev_mru_n) {
+        if (ev_mru_n < EV_MRU_MAX) ev_mru_n++;
+        pos = ev_mru_n - 1;
+    }
+    for (i = pos; i > 0; i--) {
+        ev_mru_addr[i]  = ev_mru_addr[i - 1];
+        ev_mru_bytes[i] = ev_mru_bytes[i - 1];
+    }
+    ev_mru_addr[0]  = addr;
+    ev_mru_bytes[0] = bytes;
+}
+#endif /* TARGET_OPENFPGA */
+
 /* Emit the sticky surface state for the current batch. */
 static void emit_tri_state(int textured) {
     struct GTex *t = textured ? g_cur_tex[0] : NULL;
@@ -605,6 +774,25 @@ static void emit_tri_state(int textured) {
     if (textured && t && t->ci8) {
         if (t->wmask == 0xFFFF) st.clamp_max[0] = (uint32_t)(t->w - 1) << 16;
         if (t->hmask == 0xFFFF) st.clamp_max[1] = (uint32_t)(t->h - 1) << 16;
+        /* G_TX_CLAMP (bit 1) on POWER-OF-TWO axes: the RDP clamps at the tile
+         * edge; the bitmask wrap is only correct for G_TX_WRAP.  Masking a
+         * clamped axis sends out-of-range coordinates back to texel row/col 0
+         * — SM64's face textures keep the eyes/mouth rows at the top and rely
+         * on bottom-edge clamp for the jaw/chin triangles, so wrap paints the
+         * eyes and mouth stretched across the chin (Peach intro closeup;
+         * present since the vert-tri path shipped — clamp was only wired for
+         * the non-pow2 backgrounds above).  Same shape as gfx_soft's per-axis
+         * iclamp0w sampling.  dim==1 keeps mask addressing (mask 0 already
+         * pins the index) since clamp_max 0 with clamp_min 0 means DISABLED
+         * per the of_gpu.h contract.  Mirrored axes keep mirror addressing. */
+        if ((t->cms & 0x2) && !(t->cms & 0x1) && t->w > 1) {
+            st.tex_w_mask = 0xFFFF;
+            st.clamp_max[0] = (uint32_t)(t->w - 1) << 16;
+        }
+        if ((t->cmt & 0x2) && !(t->cmt & 0x1) && t->h > 1) {
+            st.tex_h_mask = 0xFFFF;
+            st.clamp_max[1] = (uint32_t)(t->h - 1) << 16;
+        }
         /* G_TX_MIRROR (bit 0 of the N64 wrap mode): the GPU reflects the texel
          * index every W texels instead of wrapping — needed for the symmetric
          * star/circle stage transitions and Mario's shadow (quarter texture
@@ -662,6 +850,14 @@ static void emit_tri_state(int textured) {
         return;
     g_st_cache = st;
     g_st_cache_valid = 1;
+#ifdef TARGET_OPENFPGA
+    /* Eviction-model hook: record the real-texture (re)bind sequence the GPU sees
+     * (a new 0x4A actually emits here; count only when the bound texture changed). */
+    if (textured && t && t->ci8 && st.tex_addr != ev_last_tex_addr) {
+        ev_note_bind(st.tex_addr, (uint32_t)t->w * (uint32_t)t->h * (uint32_t)g_fb_bpp);
+        ev_last_tex_addr = st.tex_addr;
+    }
+#endif
     of_gpu_set_tri_state(&st);
 }
 
@@ -674,6 +870,73 @@ static inline uint32_t gpu_q29_word(const int32_t zi[3]) {
     (void)zi;
     return 0u;
 }
+
+#ifdef TARGET_OPENFPGA
+/* Minimal emit-backpressure readout (the only piece of the old GPU profiler kept):
+ * ring spin-iters = how long the CPU blocked on a FULL command ring (= GPU
+ * fill-rate limit, the thing that inflates "emit"); min_free = closest the ring
+ * got to full over the window (0 = saturated).  The _gpu_dbg_* counters are
+ * static-in-header, so only this TU (which does the ring writes) sees the live
+ * values.  spins is the delta since the last call; min_free is reset here. */
+void gpu_ring_prof_get(unsigned *spins, unsigned *min_free) {
+#ifdef OF_PC
+    /* The _gpu_dbg_* ring counters live behind #ifndef OF_PC in of_gpu.h, so on
+     * the desktop build there is no live ring to sample. */
+    *spins = 0;
+    *min_free = 0;
+#else
+    static uint32_t prev;
+    *spins = _gpu_dbg_ring_spin_iters - prev;
+    prev = _gpu_dbg_ring_spin_iters;
+    *min_free = _gpu_dbg_min_ring_free;
+    _gpu_dbg_min_ring_free = OF_GPU_RING_SIZE;
+#endif
+}
+
+/* Read this frame's texture-eviction model (see ev_note_bind).  removable/binds
+ * is the OPTIMISTIC ceiling on the tex-fetch reduction a draw-reorder could buy. */
+void gpu_evict_prof_get(unsigned *binds, unsigned *distinct, unsigned *removable,
+                        unsigned *resident, unsigned *ws_kb, unsigned *ovf) {
+    *binds = ev_binds; *distinct = ev_distinct;
+    *removable = ev_removable; *resident = ev_resident;
+    *ws_kb = ev_ws_bytes >> 10; *ovf = ev_seen_ovf;
+}
+
+/* Reset the model at the start of every frame (intra-frame reorder is the scope). */
+void gpu_evict_prof_reset(void) {
+    ev_mru_n = 0; ev_seen_n = 0; ev_last_tex_addr = 0xFFFFFFFFu;
+    ev_binds = ev_distinct = ev_resident = ev_removable = ev_ws_bytes = ev_seen_ovf = 0u;
+}
+
+/* Per-frame GPU SDRAM channel utilization (CHANUTIL): which traffic source held
+ * the SDRAM bus -- texture line-fills (rd_tex) vs the framebuffer bucket (rd_z +
+ * wr_z + wr_color) -- to settle whether heavy frames are texture-read-bound or
+ * framebuffer-bound.  The HW counters are CUMULATIVE (free-running since GPU
+ * reset), so keep a static prev and return per-frame deltas; the caller normalizes
+ * each to the clk delta.  of_gpu_debug_snapshot(.,0): the 0 is REQUIRED -- a 1
+ * would zero the ring/dma wait window that gpu_ring_prof_get already consumed.
+ *
+ * IMPORTANT: the shipped os30 bitstream does NOT yet implement these counters (the
+ * gpu_core read mux returns 0 for the CHANUTIL VAL slot), so every field reads 0,
+ * clk stays 0, and the caller prints "n/a".  This plumbing lights up automatically
+ * once the GPU RTL adds source-keyed counters at matching register offsets. */
+void gpu_chan_prof_get(unsigned *clk, unsigned *busy, unsigned *wait,
+                       unsigned *rd_tex, unsigned *rd_z,
+                       unsigned *wr_z, unsigned *wr_color, unsigned *xfer) {
+    static of_gpu_debug_snapshot_t prev;
+    of_gpu_debug_snapshot_t now;
+    of_gpu_debug_snapshot(&now, 0);
+    *clk      = now.chan_clk      - prev.chan_clk;
+    *busy     = now.chan_busy_any - prev.chan_busy_any;
+    *wait     = now.chan_wait     - prev.chan_wait;
+    *rd_tex   = now.chan_rd_tex   - prev.chan_rd_tex;
+    *rd_z     = now.chan_rd_z     - prev.chan_rd_z;
+    *wr_z     = now.chan_wr_z     - prev.chan_wr_z;
+    *wr_color = now.chan_wr_color - prev.chan_wr_color;
+    *xfer     = now.chan_xfer     - prev.chan_xfer;
+    prev = now;
+}
+#endif
 
 static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
                                size_t buf_vbo_num_tris) {
@@ -696,14 +959,46 @@ static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
     /* When a combiner has 2 colour inputs, the 2nd is the shade (the 1st is the
      * specular PRIM); pick it so e.g. the Mario head isn't black. */
     const int csel = (sh->cc.num_inputs > 1) ? (sh->cc.opt_alpha ? 4 : 3) : 0;
+    /* Does the RGB colour cycle actually consume a per-vertex colour input?  A
+     * pure decal (e.g. G_CC_DECALFADEA on the intro Peach letter: RGB cycle =
+     * (0,0,0,TEXEL0)) carries its only input (ENV) in the ALPHA cycle, so
+     * num_inputs>0 / has_color is true — yet the RGB input map is empty and
+     * colour-slot 0 is filled BLACK, so the texel would be modulated by 0x0000
+     * and the tan parchment renders dark.  Detect a texel-only RGB cycle and
+     * modulate by white (0xFFFF) instead of that black slot. */
+    const int rgb_has_input =
+        (sh->cc.c[0][0] >= SHADER_INPUT_1 && sh->cc.c[0][0] <= SHADER_INPUT_4) ||
+        (sh->cc.c[0][1] >= SHADER_INPUT_1 && sh->cc.c[0][1] <= SHADER_INPUT_4) ||
+        (sh->cc.c[0][2] >= SHADER_INPUT_1 && sh->cc.c[0][2] <= SHADER_INPUT_4) ||
+        (sh->cc.c[0][3] >= SHADER_INPUT_1 && sh->cc.c[0][3] <= SHADER_INPUT_4);
+    /* BLEND-by-texel-alpha decal form (G_CC_BLENDRGBFADEA/BLENDRGBA — Mario's cap
+     * M-logo, eyes, mustache, hair, button): RGB = (TEXEL0 - SHADE)*TEXEL0_ALPHA +
+     * SHADE, a per-pixel lerp from SHADE to the texel by the texel's alpha.
+     * classify_combine_cd doesn't match it (its multiplier is TEXEL0_ALPHA, not
+     * TEXEL0), so it fell to plain texel*SHADE — dropping the subtract + additive
+     * base and darkening/hue-shifting the opaque emblem ("inverted").  texelA is
+     * per-pixel (the per-vertex C/D resolver can't carry it), but these decals are
+     * binary-alpha: the transparent side is already SKIP_ZERO-dropped (the cap shows
+     * through), and at the opaque glyph texelA~1 so the N64 output is EXACTLY TEXEL0
+     * ((texel-shade)*1+shade = texel).  So modulate the texel by white, not SHADE. */
+    const int blend_texel_alpha =
+        sh->cc.c[0][2] == SHADER_TEXEL0A &&
+        (sh->cc.c[0][1] >= SHADER_INPUT_1 && sh->cc.c[0][1] <= SHADER_INPUT_4);
 
     /* Full combiner emulation: detect the HILITE class (texel*C+D) so the GPU
      * resolves the specular highlight (e.g. the title Mario head) instead of the
      * legacy single-input texel*C.  Only on truecolor + textured surfaces. */
     const int istride = sh->cc.opt_alpha ? 4 : 3;
     int cd_a = -1, cd_b = -1, cd_d = -1;
+    /* Combiner (texel*C+D, the HILITE/Goddard Mario head) is used UNCONDITIONALLY
+     * on truecolor: os30 always builds the combiner (it is no longer a gate — the
+     * EXCLUDE_COMBINE experiment was reverted), so the caps-check (g_combine /
+     * OF_HW_GPU_COMBINE) is vestigial and was the single failure point that left
+     * the head dark.  classify_combine_cd still only engages the HILITE class.
+     * (g_combine stays computed for diagnostics / a future caps-gated build.) */
     int cd_on = (g_truecolor && textured)
                 ? classify_combine_cd(&sh->cc, &cd_a, &cd_b, &cd_d) : 0;
+    (void)g_combine;
     if (g_truecolor && textured && !cd_on) g_cd_fallbacks++;
     g_cd_active = cd_on;
     g_subpix_tri = g_truecolor;   /* 3D vert-tri: Q12.4 subpixel Y (truecolor only) */
@@ -834,7 +1129,8 @@ static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
                              | ((uint16_t)enc_D6(vd[1]) << 5)
                              |  (uint16_t)enc_D5(vd[2]);
                 } else {
-                    rgb[k]   = has_color ? rgba_to_565((int)cr, (int)cg, (int)cb) : 0xFFFF;
+                    rgb[k]   = (rgb_has_input && !blend_texel_alpha)
+                             ? rgba_to_565((int)cr, (int)cg, (int)cb) : 0xFFFF;
                     rgb_d[k] = 0;
                 }
             } else {
