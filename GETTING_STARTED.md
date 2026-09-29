@@ -118,7 +118,7 @@ From `src/mygame/`:
 | `make debug` | Build, push via UART, stream console (Pocket-only) |
 | `make copy` | Copy to Pocket SD card |
 | `make copy TARGET=mister` | Push to a MiSTer over the network |
-| `make package` | Create distributable ZIP |
+| `make package` | *(disabled — source-only project; see DISTRIBUTION.md)* |
 | `make test` | Test on desktop (SDL2) |
 | `make clean` | Remove build artifacts |
 

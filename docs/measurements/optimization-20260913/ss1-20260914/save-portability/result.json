@@ -1,0 +1,8 @@
+{
+  "created_and_validated_bytes": 512,
+  "backup_repair_after_restart": true,
+  "nondefault_sound_mode_preserved": 2,
+  "original_defaults_restored": true,
+  "elf_sha256": "eb39d5e8b208a4db7d2f44c1ff35126cd2936756790b6f3208a49c4701976f93",
+  "launcher": "/media/fat/_Computer/_OpenfpgaOS/SM64 - GPU test.mgl"
+}

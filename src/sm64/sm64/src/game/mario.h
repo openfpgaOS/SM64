@@ -51,4 +51,12 @@ s32 execute_mario_action(UNUSED struct Object *o);
 void init_mario(void);
 void init_mario_from_save_file(void);
 
+#ifdef TARGET_OPENFPGA
+/* TRUE while the D-pad ramp is holding intendedMag below full deflection; the
+ * walking-speed updaters then clamp their accel step to the target so
+ * forwardVel rides the ramp instead of oscillating around it. */
+extern s32 gDpadRampLimited;
+void reset_dpad_ramp(void);
+#endif
+
 #endif // MARIO_H

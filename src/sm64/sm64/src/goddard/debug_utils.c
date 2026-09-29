@@ -167,7 +167,13 @@ void deactivate_timing(void) {
 
 /* 23AFC8 -> 23AFE4; orig name: func_8018C7F8 */
 void activate_timing(void) {
+#ifndef TARGET_OPENFPGA
     sTimingActive = TRUE;
+#endif
+    /* openfpgaOS: Goddard's timers only feed its debug timing gadgets, and
+     * each call reads the OS clock and searches the timer table by name
+     * (~1.2 ms per title frame).  Timing stays off; see
+     * get_scaled_timer_total for the never-created timers. */
 }
 
 /* 23AFE4 -> 23B118; orig name: func_8018C814 */
@@ -362,9 +368,14 @@ void stop_timer(const char *name) {
 f32 get_scaled_timer_total(const char *name) {
     struct GdTimer *timer;
 
+#ifdef TARGET_OPENFPGA
+    timer = get_timer(name);
+    return timer != NULL ? timer->scaledTotal : 0.0f;
+#else
     timer = get_timer_checked(name);
 
     return timer->scaledTotal;
+#endif
 }
 
 /* 23B838 -> 23B888; not called; orig name: Unknown8018D1A8 */

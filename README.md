@@ -2,11 +2,47 @@
 
 Super Mario 64 running natively on the [Analogue Pocket](https://www.analogue.co/pocket) via a VexRiscv RISC-V soft CPU on the Cyclone V FPGA. No emulation — the sm64-port PC decompilation runs as bare-metal firmware on a hardware CPU synthesized in the FPGA fabric.
 
-## Installation
+## You must supply your own Super Mario 64 ROM
 
-1. Copy the contents of the `release/` directory to your Analogue Pocket SD card root
-2. Place a US SM64 ROM (`baserom.us.z64`) in the build directory for asset extraction
-3. See [Installation Layout](#installation-layout) below for the full SD card directory structure.
+**No ROM data, and nothing extracted from a ROM, is distributed with this
+project.** Every texture, sound sample, sequence, skybox, animation and demo is
+extracted from *your* ROM at build time, on your machine, and never leaves it.
+
+| Field | Value |
+|---|---|
+| Version | Super Mario 64 (U) — North American release, big-endian `.z64` |
+| Size | 8,388,608 bytes |
+| SHA-1 | `9bef1128717f958171a4afac3ed78ee2bb4e86ce` |
+| Place at | `src/sm64/sm64/baserom.us.z64` |
+
+```bash
+sha1sum src/sm64/sm64/baserom.us.z64   # must match the SHA-1 above
+cd src/sm64 && make                    # extracts assets from your ROM, then links app.elf
+cd src/sm64 && make copy               # deploy to your own Pocket SD card
+```
+
+The build stops with a clear error if the ROM is missing. Extracted assets land
+in `src/sm64/sm64/{textures,actors,levels,assets,sound}/` and the generated C
+arrays in `src/sm64/sm64/build/`. All of it is gitignored — do not commit or
+redistribute any of it, and the same goes for the built `app.elf`.
+
+This project is **source only**: there is no prebuilt download, and
+`make package` deliberately refuses. See [DISTRIBUTION.md](DISTRIBUTION.md) for
+why.
+
+Super Mario 64 is © 1996 Nintendo Co., Ltd. This project is not affiliated
+with, endorsed by, or sponsored by Nintendo.
+
+### Build targets
+
+| Target | Effect |
+|---|---|
+| `make` | Extract assets + build `app.elf` + assemble the SD tree |
+| `make assets` | Extract and generate the ROM assets only |
+| `make copy` | Deploy to your own Pocket SD card |
+| `make clean` | Remove build artifacts |
+| `make distclean` | Also remove the generated asset tree |
+| `make assets-clean` | Also remove every extracted asset (keeps your ROM) |
 
 ### Controls
 
@@ -173,11 +209,10 @@ make mif              # Update MIF only, no resynthesis (~1 min)
 make program          # Program via JTAG (USB Blaster)
 ```
 
-### Package Release
+### Packaging
 
-```bash
-make                  # From project root — packages release/ directory
-```
+There is none. This project is source only — `make package` refuses by design,
+as does `make release`. See [DISTRIBUTION.md](DISTRIBUTION.md).
 
 ## Installation Layout
 
@@ -251,9 +286,20 @@ SD Card Root/
 
 ## License
 
-- **sm64-port:** See sm64-port license (decompilation project)
-- **VexRiscv:** MIT (SpinalHDL)
-- **PocketSM64 (FPGA/firmware):** MIT
+`REUSE.toml` and `LICENSES/` are the authoritative, per-file record. Summary:
+
+| Component | Terms |
+|---|---|
+| This project's own source | Apache-2.0 © ThinkElastic (see `LICENSE`) |
+| `src/sm64/sm64/` (vendored decompilation) | **No license grant.** Neither `n64decomp/sm64` nor `sm64-port` publishes one. Provenance: `src/sm64/sm64/UPSTREAM.md` |
+| `src/sm64/sm64/src/pc/gfx/` (Fast3D) | © 2020 Emill, MaikelChan — source redistribution only; **binary redistribution is forbidden** |
+| Super Mario 64 game data | © 1996 Nintendo Co., Ltd. — not distributed here; you supply your own ROM |
+| `src/sdk/musl/` | MIT © the musl contributors |
+| `runtime/bank.ofsf` | SC-55 samples © Roland Corporation — see `NOTICE` |
+| `runtime/pocket/*.rbf_r`, `os.bin` | Prebuilt bitstream embedding Analogue Pocket Framework (proprietary), MiSTer-derived RTL (GPL-2.0) and Intel IP — see `NOTICE` |
+
+Because those terms cannot all be satisfied by a built bundle, this project is
+distributed as **source only**. See [DISTRIBUTION.md](DISTRIBUTION.md).
 
 ## Acknowledgments
 

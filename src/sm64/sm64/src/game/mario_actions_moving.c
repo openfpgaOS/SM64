@@ -453,6 +453,14 @@ void update_walking_speed(struct MarioState *m) {
         m->forwardVel += 1.1f;
     } else if (m->forwardVel <= targetSpeed) {
         m->forwardVel += 1.1f - m->forwardVel / 43.0f;
+#ifdef TARGET_OPENFPGA
+        /* Don't overshoot a target the D-pad ramp is still raising: a +1.1 step
+         * past a target rising ~0.3/frame gets undone by the -1.0 branch below
+         * on the next frame, which reads as a lurch. */
+        if (gDpadRampLimited && m->forwardVel > targetSpeed) {
+            m->forwardVel = targetSpeed;
+        }
+#endif
     } else if (m->floor->normal.y >= 0.95f) {
         m->forwardVel -= 1.0f;
     }

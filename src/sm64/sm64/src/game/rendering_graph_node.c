@@ -155,6 +155,10 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
     }
 
     for (i = 0; i < GFX_NUM_MASTER_LISTS; i++) {
+        /* Keep scene-graph order even for depth-tested opaque geometry.
+         * Sibling display lists inherit lights, textures and combiner state.
+         * Mario's torso and lower legs rely on blue lights set by earlier
+         * parts; sorting by depth can give them a shirt's red or glove's white. */
         if ((currList = node->listHeads[i]) != NULL) {
             gDPSetRenderMode(gDisplayListHead++, modeList->modes[i], mode2List->modes[i]);
             while (currList != NULL) {

@@ -1,0 +1,319 @@
+{
+  "clock_hz": 100000000,
+  "core": {
+    "seed": 30,
+    "rbf_sha256": "da0a088d40f2110f34d538127f088068fd0e84f1505e028bff1771794e568b50",
+    "clock_hz": 100000000,
+    "worst_setup_ns": -0.246,
+    "worst_hold_ns": 0.116,
+    "alms": 29576
+  },
+  "statistic": "mean physical presentation FPS across two repeats per software version, excluding first 90 and last 30 simulation ticks per demo",
+  "scenes": [
+    {
+      "level": 30,
+      "demo": "Bowser in the Dark World",
+      "baseline": {
+        "trials": [
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 604,
+            "average_present_fps": 16.827929359033106,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 13,
+            "maximum_present_interval_ms": 83.325,
+            "render_ms_mean": 50.30437153392331,
+            "work_ms_mean": 33.27726490066225
+          },
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 604,
+            "average_present_fps": 16.869786694734543,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 13,
+            "maximum_present_interval_ms": 83.327,
+            "render_ms_mean": 50.15794410029499,
+            "work_ms_mean": 33.18829139072847
+          }
+        ],
+        "mean_fps": 16.848858026883825,
+        "minimum_one_second_fps": 13
+      },
+      "optimized": {
+        "trials": [
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 604,
+            "average_present_fps": 17.686438913027235,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 14,
+            "maximum_present_interval_ms": 83.327,
+            "render_ms_mean": 47.779386882022465,
+            "work_ms_mean": 33.25146854304636
+          },
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 604,
+            "average_present_fps": 17.63674826651879,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 14,
+            "maximum_present_interval_ms": 83.331,
+            "render_ms_mean": 47.90108599999999,
+            "work_ms_mean": 33.233370860927145
+          }
+        ],
+        "mean_fps": 17.661593589773013,
+        "minimum_one_second_fps": 14
+      },
+      "fps_gain_percent": 4.823683371255183
+    },
+    {
+      "level": 24,
+      "demo": "Whomp\u2019s Fortress",
+      "baseline": {
+        "trials": [
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 512,
+            "average_present_fps": 15.86729925861069,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 13,
+            "maximum_present_interval_ms": 83.332,
+            "render_ms_mean": 44.37079767527675,
+            "work_ms_mean": 33.27213671875
+          },
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 512,
+            "average_present_fps": 15.780973695463462,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 13,
+            "maximum_present_interval_ms": 83.328,
+            "render_ms_mean": 44.50186881481481,
+            "work_ms_mean": 33.282568359375
+          }
+        ],
+        "mean_fps": 15.824136477037076,
+        "minimum_one_second_fps": 13
+      },
+      "optimized": {
+        "trials": [
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 512,
+            "average_present_fps": 16.21858388576543,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 14,
+            "maximum_present_interval_ms": 83.332,
+            "render_ms_mean": 43.39232863309353,
+            "work_ms_mean": 33.350966796875
+          },
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 512,
+            "average_present_fps": 16.261278263988046,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 14,
+            "maximum_present_interval_ms": 83.327,
+            "render_ms_mean": 43.252840827338126,
+            "work_ms_mean": 33.27811328125
+          }
+        ],
+        "mean_fps": 16.239931074876736,
+        "minimum_one_second_fps": 14
+      },
+      "fps_gain_percent": 2.6275973949228426
+    },
+    {
+      "level": 5,
+      "demo": "Cool, Cool Mountain",
+      "baseline": {
+        "trials": [
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 851,
+            "average_present_fps": 17.227729937681865,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 13,
+            "maximum_present_interval_ms": 83.321,
+            "render_ms_mean": 44.481203401639334,
+            "work_ms_mean": 33.22910575793184
+          },
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 851,
+            "average_present_fps": 17.20255145982547,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 13,
+            "maximum_present_interval_ms": 83.319,
+            "render_ms_mean": 44.537411864754105,
+            "work_ms_mean": 33.266893066980025
+          }
+        ],
+        "mean_fps": 17.215140698753668,
+        "minimum_one_second_fps": 13
+      },
+      "optimized": {
+        "trials": [
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 851,
+            "average_present_fps": 17.566124707539046,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 13,
+            "maximum_present_interval_ms": 83.32,
+            "render_ms_mean": 43.56682522088353,
+            "work_ms_mean": 33.26052408930669
+          },
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 851,
+            "average_present_fps": 17.566124707539046,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 13,
+            "maximum_present_interval_ms": 83.329,
+            "render_ms_mean": 43.54931240963856,
+            "work_ms_mean": 33.26352173913043
+          }
+        ],
+        "mean_fps": 17.566124707539046,
+        "minimum_one_second_fps": 13
+      },
+      "fps_gain_percent": 2.03880999247823
+    },
+    {
+      "level": 4,
+      "demo": "Big Boo\u2019s Haunt",
+      "baseline": {
+        "trials": [
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 738,
+            "average_present_fps": 17.292351409875927,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 11,
+            "maximum_present_interval_ms": 99.979,
+            "render_ms_mean": 41.81674811764706,
+            "work_ms_mean": 33.25570054200542
+          },
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 738,
+            "average_present_fps": 17.34481429750143,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 11,
+            "maximum_present_interval_ms": 99.977,
+            "render_ms_mean": 41.74405110328639,
+            "work_ms_mean": 33.25290921409214
+          }
+        ],
+        "mean_fps": 17.318582853688678,
+        "minimum_one_second_fps": 11
+      },
+      "optimized": {
+        "trials": [
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 738,
+            "average_present_fps": 17.548380498236387,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 11,
+            "maximum_present_interval_ms": 99.979,
+            "render_ms_mean": 41.09586453703704,
+            "work_ms_mean": 33.301602981029816
+          },
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 738,
+            "average_present_fps": 17.54838692865852,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 11,
+            "maximum_present_interval_ms": 99.979,
+            "render_ms_mean": 41.088892013888895,
+            "work_ms_mean": 33.30786856368564
+          }
+        ],
+        "mean_fps": 17.548383713447453,
+        "minimum_one_second_fps": 11
+      },
+      "fps_gain_percent": 1.3269033713681155
+    },
+    {
+      "level": 12,
+      "demo": "Jolly Roger Bay",
+      "baseline": {
+        "trials": [
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 646,
+            "average_present_fps": 14.16754962242319,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 10,
+            "maximum_present_interval_ms": 99.991,
+            "render_ms_mean": 49.88734534426229,
+            "work_ms_mean": 33.28139164086687
+          },
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 646,
+            "average_present_fps": 14.153958755177952,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 10,
+            "maximum_present_interval_ms": 116.631,
+            "render_ms_mean": 49.878491414473686,
+            "work_ms_mean": 33.21310835913312
+          }
+        ],
+        "mean_fps": 14.16075418880057,
+        "minimum_one_second_fps": 10
+      },
+      "optimized": {
+        "trials": [
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 646,
+            "average_present_fps": 14.40911842588635,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 10,
+            "maximum_present_interval_ms": 99.989,
+            "render_ms_mean": 49.14106400000001,
+            "work_ms_mean": 33.25011764705882
+          },
+          {
+            "skip_first_sim_ticks": 90,
+            "skip_last_sim_ticks": 30,
+            "sim_ticks": 646,
+            "average_present_fps": 14.375602676206857,
+            "unobserved_presents": 0,
+            "minimum_one_second_fps": 10,
+            "maximum_present_interval_ms": 99.987,
+            "render_ms_mean": 49.1917130420712,
+            "work_ms_mean": 33.2450959752322
+          }
+        ],
+        "mean_fps": 14.392360551046604,
+        "minimum_one_second_fps": 10
+      },
+      "fps_gain_percent": 1.635551038864902
+    }
+  ]
+}

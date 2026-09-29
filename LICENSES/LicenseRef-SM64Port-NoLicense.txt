@@ -1,0 +1,71 @@
+LicenseRef-SM64Port-NoLicense
+=============================
+
+THIS IS NOT A LICENSE. It is a statement of fact about material in this
+repository whose authors have published no license terms.
+
+What this identifier marks
+--------------------------
+
+Original (not Nintendo-derived) work authored by the contributors to the
+upstream decompilation and its PC/DOS port chain, vendored under
+src/sm64/sm64/. Typical examples:
+
+  * src/pc/** other than src/pc/gfx/** -- the PC port shim: configfile.c,
+    audio backends, controller backends, mixer.c, pc_main.c,
+    ultra_reimplementation.c
+  * tools/*.c, tools/*.h, tools/*.cpp and tools/*.py written by the decomp
+    project (asm_processor/, textconv.c, hashtable.c, aifc_decode.c,
+    aiff_extract_codebook.c, extract_data_for_mio.c, patch_libultra_math.c,
+    gen_asset_list.cpp, determine-endian-bitwidth.c, the *.py helpers, the
+    *.sh helpers)
+  * project scaffolding: Makefile, Makefile.split, sm64.ld, Dockerfile,
+    Jenkinsfile, Doxyfile, diff.py, format.sh, README.md, CHANGES,
+    .clang-format, .clang-tidy, .gitattributes, .gitignore, charmap*.txt,
+    undefined_syms.txt, *.sha1
+
+Files in these areas that carry their own explicit license notice are NOT
+covered by this identifier; they are annotated separately in REUSE.toml (see
+tools/sm64tools.LICENSE, tools/n64graphics_ci_dir/LICENSE, the MIT notice at
+the top of tools/armips.cpp, the LGPL notice at the top of
+tools/audiofile/audiofile.cpp, tools/stb/*, tools/utf8.c,
+tools/ido5.3_compiler/LICENSE.md, src/pc/gfx/LICENSE.txt).
+
+Upstream identity
+-----------------
+
+Verified from in-tree evidence:
+
+  * src/sm64/sm64/README.md is titled "Super Mario 64 DOS Port" and embeds
+    images from raw.githubusercontent.com/fgsfdsfgs/sm64-port/dos/media/...,
+    identifying the immediate upstream as fgsfdsfgs/sm64-port, branch "dos".
+  * Makefile sets TARGET_DOS ?= 1 and COMPILER ?= ido, and selects an
+    i586-pc-msdosdjgpp-* toolchain; DOS-only sources are present
+    (src/pc/gfx/gfx_dos_api.c, src/pc/audio/audio_sb16.c,
+    lib/{allegro,dmesa,glide3,osmesa}).
+  * The first line of CHANGES is "Refresh 11", identifying the decompilation
+    base as n64decomp/sm64 Refresh 11.
+
+The exact upstream commit SHA is NOT recoverable from this repository: the
+vendored tree is a flattened copy with no .gitmodules and no nested .git.
+No SHA is asserted here rather than inventing one.
+
+Copyright status
+----------------
+
+Copyright (C) the contributors to n64decomp/sm64, sm64-port/sm64-port, and
+fgsfdsfgs/sm64-port. Neither the decompilation nor any of the port forks ships
+a repository-level LICENSE file, and none of them makes an express license
+grant. Absent an express grant, all rights are reserved by default under
+copyright law.
+
+  * No permission to copy, modify, or redistribute this material has been
+    granted in writing by its authors.
+  * The Apache-2.0 grant this project makes for its OWN work does NOT extend
+    to this material.
+  * It is present here, and redistributed, on exactly the same footing as in
+    the upstream repositories.
+
+Note also that much of this code is functionally inseparable from the
+Nintendo-derived decompilation it drives; see
+LicenseRef-Nintendo-SM64-NoLicense.txt.

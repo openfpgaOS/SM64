@@ -360,8 +360,25 @@ void get_vertex_coords(s8 index, s8 shadowVertexType, s8 *xCoord, s8 *zCoord) {
  */
 void calculate_vertex_xyz(s8 index, struct Shadow s, f32 *xPosVtx, f32 *yPosVtx, f32 *zPosVtx,
                           s8 shadowVertexType) {
-    f32 tiltedScale = cosf(s.floorTilt * M_PI / 180.0) * s.shadowScale;
-    f32 downwardAngle = s.floorDownwardAngle * M_PI / 180.0;
+    /* sinf/cosf are the WRONG primitive for this CPU.  musl's float
+     * transcendentals compute in DOUBLE internally (__sindf/__cosdf/
+     * __rem_pio2f), and rv32imafc has no D extension -- so each call expands to
+     * ~13 libgcc soft-float calls (__muldf3/__adddf3/...), roughly 600-1500
+     * cycles.  This function runs once PER SHADOW VERTEX PER FRAME (9 for
+     * SHADOW_WITH_9_VERTS), so a scene with a dozen shadow-casting objects was
+     * burning milliseconds per frame here.
+     *
+     * Both angles come straight from atan2_deg() = atan2s() * 360/65535, i.e.
+     * they are s16 binary angles that were scaled into degrees -- so scaling
+     * them back and using SM64's own sins()/coss() table (what the N64 build
+     * does) is a near-exact round trip, not an approximation of a float
+     * result.  Residual is the table's 1/4096-turn step: <= 7.7e-4 on the
+     * sine, i.e. sub-0.1-world-unit on a shadow corner.  Cost: one load. */
+    const s16 tiltAngle = (s16) (s32) (s.floorTilt * (65535.0f / 360.0f));
+    const s16 downAngle = (s16) (s32) (s.floorDownwardAngle * (65535.0f / 360.0f));
+    const f32 sinDown = sins(downAngle);
+    const f32 cosDown = coss(downAngle);
+    f32 tiltedScale = coss(tiltAngle) * s.shadowScale;
     f32 halfScale;
     f32 halfTiltedScale;
     s8 xCoordUnit;
@@ -374,8 +391,8 @@ void calculate_vertex_xyz(s8 index, struct Shadow s, f32 *xPosVtx, f32 *yPosVtx,
     halfScale = (xCoordUnit * s.shadowScale) / 2.0;
     halfTiltedScale = (zCoordUnit * tiltedScale) / 2.0;
 
-    *xPosVtx = (halfTiltedScale * sinf(downwardAngle)) + (halfScale * cosf(downwardAngle)) + s.parentX;
-    *zPosVtx = (halfTiltedScale * cosf(downwardAngle)) - (halfScale * sinf(downwardAngle)) + s.parentZ;
+    *xPosVtx = (halfTiltedScale * sinDown) + (halfScale * cosDown) + s.parentX;
+    *zPosVtx = (halfTiltedScale * cosDown) - (halfScale * sinDown) + s.parentZ;
 
     if (gShadowAboveWaterOrLava) {
         *yPosVtx = s.floorHeight;

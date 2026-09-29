@@ -20,6 +20,9 @@
 #include "sfx.h"
 #include "shape_helper.h"
 #include "skin.h"
+#ifdef TARGET_OPENFPGA
+#include "gd_trig_openfpga.h"
+#endif
 
 #define MAX_GD_DLS 1000
 #define OS_MESG_SI_COMPLETE 0x33333333
@@ -830,12 +833,20 @@ Vp *next_vp(void) {
 
 /* 249AAC -> 249AEC */
 f64 gd_sin_d(f64 x) {
+#ifdef TARGET_OPENFPGA
+    return gd_trig_sinf(x);
+#else
     return sinf(x);
+#endif
 }
 
 /* 249AEC -> 249B2C */
 f64 gd_cos_d(f64 x) {
+#ifdef TARGET_OPENFPGA
+    return gd_trig_cosf(x);
+#else
     return cosf(x);
+#endif
 }
 
 /* 249B2C -> 249BA4 */

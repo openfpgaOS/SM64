@@ -50,4 +50,13 @@ void aMixImpl(int16_t gain, uint16_t in_addr, uint16_t out_addr);
 #define aEnvMixer(pkt, f, s) aEnvMixerImpl(f, s)
 #define aMix(pkt, f, g, i, o) aMixImpl(g, i, o)
 
+/* VADPCM pre-decode: decode each ADPCM sample to S16 PCM once, then run
+ * aADPCMdec as a memcpy passthrough.  Set to 0 to disable (pure ADPCM). */
+#define SM64_AUDIO_PREDECODE 1
+void aSetPredecodeImpl(const int16_t *pcm_src);
+const int16_t *audio_predecode_get(const uint8_t *sampleAddr, const int16_t *book,
+        int order, int npred, uint32_t sampleSize,
+        uint32_t loopStart, uint32_t loopCount, const int16_t *loopState);
+#define aSetPredecode(pkt, s) aSetPredecodeImpl(s)
+
 #endif

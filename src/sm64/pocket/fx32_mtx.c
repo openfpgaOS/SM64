@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 #include <ultra64.h>
 #include "pocket/fx32_mtx.h"
 
@@ -25,27 +31,44 @@ void mtx4_copy(Mtx4 dest, Mtx4 src) {
 // Uses FXMACS/FXMACR for dot products
 // ============================================
 
+static inline fx32 mtx_dot3(fx32 a0, fx32 a1, fx32 a2,
+                            fx32 b0, fx32 b1, fx32 b2) {
+#ifdef TARGET_OPENFPGA
+    /* RV32 has mul/mulh. A local sum avoids the emulated global MAC state;
+     * unsigned accumulation defines wraparound even for extreme inputs. */
+    uint64_t sum = (uint64_t)((int64_t)a0 * b0)
+                 + (uint64_t)((int64_t)a1 * b1)
+                 + (uint64_t)((int64_t)a2 * b2);
+    return (fx32)(sum >> 16);
+#else
+    fx32_mac(a0, b0);
+    fx32_mac(a1, b1);
+    fx32_mac(a2, b2);
+    return fx32_mac_read();
+#endif
+}
+
 void mtx4_mul(Mtx4 dest, Mtx4 a, Mtx4 b) {
     Mtx4 temp;
 
     // Rows 0-2: 3x3 rotation block
     // temp[row][col] = a[row][0]*b[0][col] + a[row][1]*b[1][col] + a[row][2]*b[2][col]
     register s32 row, col;
+#if defined(__GNUC__) && defined(__riscv) && __riscv_xlen == 32
+    /* Unrolling all nine 64-bit dot products spills heavily on RV32. */
+#pragma GCC unroll 1
+#endif
     for (row = 0; row < 3; row++) {
         for (col = 0; col < 3; col++) {
-            fx32_mac(a[row][0], b[0][col]);
-            fx32_mac(a[row][1], b[1][col]);
-            fx32_mac(a[row][2], b[2][col]);
-            temp[row][col] = fx32_mac_read();
+            temp[row][col] = mtx_dot3(a[row][0], a[row][1], a[row][2],
+                                      b[0][col], b[1][col], b[2][col]);
         }
     }
 
     // Row 3: translation = a[3] * b_rotation + b[3]
     for (col = 0; col < 3; col++) {
-        fx32_mac(a[3][0], b[0][col]);
-        fx32_mac(a[3][1], b[1][col]);
-        fx32_mac(a[3][2], b[2][col]);
-        temp[3][col] = fx32_mac_read() + b[3][col];
+        temp[3][col] = mtx_dot3(a[3][0], a[3][1], a[3][2],
+                               b[0][col], b[1][col], b[2][col]) + b[3][col];
     }
 
     // Bottom row constants
@@ -135,6 +158,14 @@ void mtx4_rotate_xyz_and_translate(Mtx4 dest, Vec3fx translate, s16 *rotate) {
 void mtx4_billboard(Mtx4 dest, Mtx4 mtx, Vec3fx position, s16 angle) {
     fx32 ca = fx32_coss(angle);
     fx32 sa = fx32_sins(angle);
+    /* Read the source rotation before writing dest: callers may use the
+     * same matrix for both, including the graph's in-place billboard. */
+    fx32 tx = mtx_dot3(mtx[0][0], mtx[1][0], mtx[2][0],
+                       position[0], position[1], position[2]) + mtx[3][0];
+    fx32 ty = mtx_dot3(mtx[0][1], mtx[1][1], mtx[2][1],
+                       position[0], position[1], position[2]) + mtx[3][1];
+    fx32 tz = mtx_dot3(mtx[0][2], mtx[1][2], mtx[2][2],
+                       position[0], position[1], position[2]) + mtx[3][2];
 
     dest[0][0] = ca;
     dest[0][1] = sa;
@@ -152,20 +183,9 @@ void mtx4_billboard(Mtx4 dest, Mtx4 mtx, Vec3fx position, s16 angle) {
     dest[2][3] = 0;
 
     // Translation: position transformed by mtx rotation + mtx translation
-    fx32_mac(mtx[0][0], position[0]);
-    fx32_mac(mtx[1][0], position[1]);
-    fx32_mac(mtx[2][0], position[2]);
-    dest[3][0] = fx32_mac_read() + mtx[3][0];
-
-    fx32_mac(mtx[0][1], position[0]);
-    fx32_mac(mtx[1][1], position[1]);
-    fx32_mac(mtx[2][1], position[2]);
-    dest[3][1] = fx32_mac_read() + mtx[3][1];
-
-    fx32_mac(mtx[0][2], position[0]);
-    fx32_mac(mtx[1][2], position[1]);
-    fx32_mac(mtx[2][2], position[2]);
-    dest[3][2] = fx32_mac_read() + mtx[3][2];
+    dest[3][0] = tx;
+    dest[3][1] = ty;
+    dest[3][2] = tz;
 
     dest[3][3] = FX32_ONE;
 }

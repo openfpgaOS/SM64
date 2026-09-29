@@ -28,6 +28,9 @@
 #include "memory.h"
 #include "object_fields.h"
 #include "object_helpers.h"
+#ifdef TARGET_OPENFPGA
+#include "pocket/controller_pocket.h"
+#endif
 #include "object_list_processor.h"
 #include "print.h"
 #include "save_file.h"
@@ -1292,12 +1295,134 @@ void update_mario_button_inputs(struct MarioState *m) {
     }
 }
 
+#ifdef TARGET_OPENFPGA
+/**
+ * Digital D-pad -> analog magnitude ramp.
+ *
+ * A real stick takes a moment to travel from centre to the gate, and can be
+ * held anywhere in between; a D-pad snaps straight to full deflection and
+ * offers nothing in between.  Model the missing travel as a virtual stick that
+ * eases out while a direction is held and springs back once it is released:
+ *
+ *   - a tap is a short, slow nudge -- useful for lining up on a ledge,
+ *   - the level carries across a direction change, since rotating a real stick
+ *     does not lose deflection,
+ *   - the level also survives a brief release, so tapping a direction to steer
+ *     while running does not drop Mario back to a walk,
+ *   - but the *output* is zero the frame the D-pad is released: the spring
+ *     only limits how fast you can push, never how fast you can stop.
+ *
+ * What a ramp alone cannot give is the stick's defining trait: a magnitude you
+ * hold for as long as you like.  A press that is held forever would always end
+ * at a full run.  So the ramp's *ceiling* is chosen the way Super Mario 64 DS
+ * chose it -- the D-pad walks, and a held button runs:
+ *
+ *   - press and hold            -> eases to DPAD_WALK_LEVEL and stays there,
+ *   - press and hold + run      -> eases all the way to the gate (a full run),
+ *   - run pressed mid-walk      -> the ceiling lifts and the ramp carries on up,
+ *   - run released mid-run      -> eases back down to the walk, never snapping.
+ *
+ * The run button held BEFORE the direction goes down is the DS's charged run:
+ * the virtual
+ * stick starts at the gate with no travel at all, which here simply restores
+ * stock N64 launch behaviour (update_walking_speed() still climbs forwardVel
+ * from 8 to 32 on its own).
+ *
+ * DPAD_WALK_LEVEL is sqrt(1/2), i.e. intendedMag 16 -- exactly half the run's
+ * 32, and inside anim_and_audio_for_walk()'s 5..22 band for MARIO_ANIM_WALKING,
+ * clear of the 18 it falls back to the walk animation at.
+ *
+ * intendedMag goes as the square of the stick magnitude, so nearly all of the
+ * useful resolution lives at the low end of the ramp -- which is also why this
+ * costs so little at the top end.  A 4-frame tap covers ~37% of the ground it
+ * used to, while a full-speed run is delayed by only ~7 frames.
+ * DPAD_RAMP_MIN keeps the first frame of a press from being a dead spot.
+ *
+ * update_walking_speed() is a bang-bang controller: +1.1 under target, -1.0
+ * over it, with no clamp.  It cannot track a target rising slower than
+ * ~1.0/frame, so while the ramp is limiting it would overshoot and get knocked
+ * back every other frame -- a visible lurch at the start of every press.
+ * gDpadRampLimited tells the walking-speed updaters to clamp the accel step to
+ * the target instead, which glues forwardVel to the ramp.  It is only set while
+ * the ramp is actually below the gate, so full-deflection movement keeps stock
+ * physics exactly.
+ *
+ * Only Mario's movement intent is ramped.  Menus (handle_menu_scrolling() edge-
+ * triggers on a raw axis past 60, out of 70 at full deflection), the file-select
+ * cursor and the C-up camera all keep instant digital response.
+ */
+#define DPAD_RAMP_MIN     0.25f   /* deflection on the first frame of a press */
+#define DPAD_RAMP_FRAMES  14.0f   /* frames from DPAD_RAMP_MIN to the gate */
+#define DPAD_RAMP_RETURN  0.08f   /* spring-back per frame while released */
+#define DPAD_WALK_LEVEL   0.7071f /* ceiling without the run button: mag 16 */
+
+static f32 sDpadRampLevel = 0.0f;
+static s32 sDpadRunCharged = FALSE;
+
+/* TRUE while the D-pad ramp is holding intendedMag below full deflection. */
+s32 gDpadRampLimited = FALSE;
+
+void reset_dpad_ramp(void) {
+    sDpadRampLevel = 0.0f;
+    sDpadRunCharged = FALSE;
+    gDpadRampLimited = FALSE;
+}
+
+static f32 dpad_ramp_level(s32 held, s32 run) {
+    f32 ceiling;
+
+    if (!held) {
+        /* Run held while standing still arms the charged start. */
+        sDpadRunCharged = run;
+        sDpadRampLevel -= DPAD_RAMP_RETURN;
+        if (sDpadRampLevel < 0.0f) {
+            sDpadRampLevel = 0.0f;
+        }
+        return sDpadRampLevel;
+    }
+
+    ceiling = run ? 1.0f : DPAD_WALK_LEVEL;
+
+    if (sDpadRunCharged && run) {
+        sDpadRampLevel = ceiling;               /* charged: skip the travel */
+    } else if (sDpadRampLevel < DPAD_RAMP_MIN) {
+        sDpadRampLevel = DPAD_RAMP_MIN;
+    } else if (sDpadRampLevel < ceiling) {
+        sDpadRampLevel += (1.0f - DPAD_RAMP_MIN) / DPAD_RAMP_FRAMES;
+        if (sDpadRampLevel > ceiling) {
+            sDpadRampLevel = ceiling;
+        }
+    } else if (sDpadRampLevel > ceiling) {
+        /* Run released mid-run: ease down to the walk instead of snapping. */
+        sDpadRampLevel -= DPAD_RAMP_RETURN;
+        if (sDpadRampLevel < ceiling) {
+            sDpadRampLevel = ceiling;
+        }
+    }
+
+    if (!run) {
+        sDpadRunCharged = FALSE;
+    }
+    return sDpadRampLevel;
+}
+#endif
+
 /**
  * Updates the joystick intended magnitude.
  */
 void update_mario_joystick_inputs(struct MarioState *m) {
     struct Controller *controller = m->controller;
-    f32 mag = ((controller->stickMag / 64.0f) * (controller->stickMag / 64.0f)) * 64.0f;
+    f32 stickMag = controller->stickMag;
+#ifdef TARGET_OPENFPGA
+    s32 dpadHeld = gPocketDpadStick && stickMag > 0.0f;
+    f32 ramp = dpad_ramp_level(dpadHeld, gPocketRunHeld);
+
+    gDpadRampLimited = dpadHeld && ramp < 1.0f;
+    if (dpadHeld) {
+        stickMag *= ramp;
+    }
+#endif
+    f32 mag = ((stickMag / 64.0f) * (stickMag / 64.0f)) * 64.0f;
 
     if (m->squishTimer == 0) {
         m->intendedMag = mag / 2.0f;
@@ -1798,6 +1923,12 @@ void init_mario(void) {
     struct Object *capObject;
 
     unused80339F10 = 0;
+
+#ifdef TARGET_OPENFPGA
+    /* dpad_ramp_level() only ticks while Mario's behavior runs, so a pause or a
+     * warp freezes the level mid-ramp.  Start every load from rest. */
+    reset_dpad_ramp();
+#endif
 
     gMarioState->actionTimer = 0;
     gMarioState->framesSinceA = 0xFF;

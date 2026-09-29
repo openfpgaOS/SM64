@@ -1,0 +1,64 @@
+LicenseRef-DOSPort-ThirdParty-Unclear
+=====================================
+
+THIS IS NOT A LICENSE. It is a statement of what could and could not be
+verified about third-party DOS-port dependencies vendored under
+src/sm64/sm64/lib/.
+
+These subtrees exist only to serve the upstream fgsfdsfgs/sm64-port "dos"
+build target. They are NOT used by this project's openfpgaOS core build and
+contribute nothing to app.elf. They are retained solely so the vendored tree
+stays a faithful copy of upstream.
+
+Per-subtree findings
+--------------------
+
+lib/glide3/
+    lib/glide3/drivers/{v1,v2,v3,v4,vr}/glide3x.dxe are DJGPP dynamic modules
+    (opaque binary; `file` reports "data"). lib/glide3/drivers/README.md states
+    verbatim: "These have been copied from the [DOjs repository]
+    (https://github.com/SuperIlu/DOjS/tree/master/glide3x)."
+    The underlying Glide3 API/runtime originates with 3Dfx Interactive, Inc.,
+    whose Glide sources were published under the "3Dfx Glide Source Code
+    General Public License". NO license text accompanies these binaries in
+    this repository, and no in-tree evidence establishes which sources or
+    which license these particular .dxe builds derive from. Provenance beyond
+    "copied from DOjS" is UNVERIFIED.
+    lib/glide3/dxe.c is a DJGPP symbol-import stub (a list of extern_asm
+    declarations) with no copyright notice; its authorship is unverified.
+
+lib/dmesa/
+    lib/dmesa/README.DJ identifies the contents as the "Mesa 6.0 DOS/DJGPP
+    Port v1.5", with a driver originating in Brian Paul's ddsample.c from
+    Mesa 3.4.2. Its "Legal" section reads, verbatim and in full:
+        "Mesa copyright applies, provided this package is used within Mesa.
+         For anything else, see GPL."
+    That statement is ambiguous: it names two different license regimes
+    without reproducing either, and no Mesa or GPL license text is vendored
+    alongside it. The actual terms are UNRESOLVED.
+    Only README.DJ is tracked in this repository; the accompanying libgl.a is
+    a build artifact excluded by .gitignore (*.a).
+
+lib/osmesa/
+    lib/osmesa/README.DJ reads, in full: "OSMesa 6.0 DOS/DJGPP -- Binaries
+    taken from http://bisqwit.iki.fi/jutut/kuvat/programming_examples/
+    djgpp_mesa.zip". No license statement of any kind. OSMesa is part of Mesa,
+    which is distributed under an MIT-style license, but the terms of THIS
+    redistribution are UNVERIFIED.
+    Only README.DJ is tracked; libgl.a is excluded by .gitignore.
+
+lib/allegro/
+    Contains only liballeg.a, a build artifact excluded by .gitignore, so
+    NOTHING from this subtree is tracked in this repository. The Allegro
+    game-programming library is upstream distributed under the Allegro
+    "giftware" license (Allegro 4) or zlib (Allegro 5); which applies to this
+    prebuilt archive is UNVERIFIED, and it is moot while nothing is tracked.
+
+Conclusion
+----------
+
+For the files this identifier is applied to, this project makes no license
+claim, asserts no license grant, and has been unable to establish the
+governing terms from in-tree evidence. Anyone redistributing these files
+should establish their provenance independently, or omit them (they are not
+needed to build this project).

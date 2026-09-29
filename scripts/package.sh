@@ -22,6 +22,18 @@ SDK_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SPECIFIC="$1"
 TARGET="${TARGET:-pocket}"
 
+# SOURCE-ONLY POLICY — see DISTRIBUTION.md.
+# This dispatcher zips every directory under build/$TARGET/ regardless of what
+# the individual core Makefiles say, so it is a second route to a binary
+# bundle and needs its own gate.  An env opt-in rather than a hard refusal,
+# because this script is SDK-generic; the un-overridable refusal for this core
+# lives in src/sm64/Makefile.  `make` and `make copy` are unaffected.
+if [ -z "${OF_ALLOW_BINARY_DIST:-}" ]; then
+    echo "refusing: binary packaging is disabled in this repository (SOURCE ONLY)." >&2
+    echo "  See DISTRIBUTION.md. 'make' and 'make copy' are unaffected." >&2
+    exit 1
+fi
+
 PLAT="$SDK_DIR/src/sdk/platforms/$TARGET"
 [ -f "$PLAT/package.sh" ] || {
     echo "No packager for target '$TARGET' (expected $PLAT/package.sh)."

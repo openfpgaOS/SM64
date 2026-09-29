@@ -312,7 +312,18 @@ endif
 #   PREV=<tag>    override the changelog baseline (e.g. PREV=v1.1.12 to bridge
 #                 Doom's first per-core release off the legacy v1.1.x series)
 #   PUBLISH=1     publish a live release instead of a draft
+#
+# SOURCE-ONLY POLICY: publishing a built bundle is disabled in this
+# repository — see DISTRIBUTION.md.  Set OF_ALLOW_BINARY_DIST=1 only if you
+# have established that every component may lawfully be redistributed in
+# built form (this core cannot: see src/sm64/sm64/src/pc/gfx/LICENSE.txt
+# clause 2, and the ROM-derived assets baked into app.elf).
 release:
+	@test -n "$(OF_ALLOW_BINARY_DIST)" || { \
+		printf "refusing: publishing built artifacts is disabled (SOURCE ONLY).\n"; \
+		printf "  See DISTRIBUTION.md. 'make' and 'make copy' are unaffected.\n"; \
+		exit 1; \
+	}
 	@test -n "$(CORE)" || { \
 		printf "Usage: make release CORE=<name> [PREV=<tag>] [PUBLISH=1]\n"; \
 		exit 1; \
@@ -344,10 +355,23 @@ push:
 	@# game README/GETTING_STARTED) — only seed them if absent.
 	@[ -f "$(DEST)/README.md" ] || cp -f README.md "$(DEST)/README.md"
 	@[ -f "$(DEST)/GETTING_STARTED.md" ] || { [ -f GETTING_STARTED.md ] && cp -f GETTING_STARTED.md "$(DEST)/GETTING_STARTED.md"; } || true
+	@# Container tooling MUST travel with sdk.mk: its default build path
+	@# re-execs make through tools/sdk-container.sh, and the wrapper's
+	@# OF_SDK_IN_CONTAINER export is what stops that recursion inside the
+	@# container.  A repo with a new sdk.mk and an old wrapper can't build.
+	@mkdir -p "$(DEST)/tools/docker"
+	@cp -f tools/sdk-container.sh "$(DEST)/tools/sdk-container.sh"
+	@chmod +x "$(DEST)/tools/sdk-container.sh"
+	@cp -f tools/oci.sh "$(DEST)/tools/oci.sh"
+	@cp -f tools/docker/Dockerfile.firmware "$(DEST)/tools/docker/Dockerfile.firmware"
 	@mkdir -p "$(DEST)/runtime/pocket"
 	@cp -f runtime/pocket/os.bin "$(DEST)/runtime/pocket/os.bin"
+	@# loader.bin is the target-generic chip32 variant selector (NOT a
+	@# per-core bitstream), so it must propagate — otherwise game repos keep a
+	@# stale loader that ignores VARIANT=os30 and always boots os25.
+	@cp -f runtime/pocket/loader.bin "$(DEST)/runtime/pocket/loader.bin"
 	@cp -f runtime/bank.ofsf     "$(DEST)/runtime/bank.ofsf"
-	@printf "  skipped: runtime/pocket/{os25.rbf_r, os30.rbf_r, ap_core.sof, loader.bin}\n"
+	@printf "  skipped: runtime/pocket/{*.rbf_r, ap_core.sof}\n"
 
 # ── Build host tools ────────────────────────────────────────────────
 tools:
@@ -363,12 +387,12 @@ tools:
 clean:
 ifneq ($(CORE_EXPLICIT),)
 ifeq ($(CORE),sdk)
-	@if [ -d src/apps ]; then $(MAKE) -C src/apps clean; fi
+	$(MAKE) -C src/apps clean
 else
 	$(MAKE) -C src/$(CORE) clean
 endif
 else
-	@if [ -d src/apps ]; then $(MAKE) -C src/apps clean; fi
+	$(MAKE) -C src/apps clean
 	$(MAKE) -C src/tools/phdp clean
 	@for d in src/*/; do \
 		[ "$$d" = "src/apps/" ] || [ "$$d" = "src/sdk/" ] || [ "$$d" = "src/tools/" ] && continue; \
@@ -381,4 +405,11 @@ endif
 distclean: clean
 	rm -rf releases
 
-.PHONY: all help setup core build debug test copy package release push tools clean distclean
+# ── Source-only invariant ────────────────────────────────────────────
+# Fails if a built artifact or a ROM has been committed. See DISTRIBUTION.md.
+check-dist:
+	@! git ls-files | grep -iE '\.(elf|zip|z64|n64|v64)$$' || { \
+		echo "error: a built artifact or ROM image is tracked in git"; exit 1; }
+	@echo "check-dist: OK (no tracked binaries or ROM images)"
+
+.PHONY: all help setup core build debug test copy package release push tools clean distclean check-dist

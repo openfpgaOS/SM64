@@ -1,0 +1,19 @@
+/home/alberto/.cache/sm64-optimization-20260913/baseline-obj/app.elf  :
+section               size        addr
+.text              9658064   272629760
+.eh_frame               64   282287824
+.init_array              4   282287888
+.data              2748296   282287896
+.bss               3381112   285048832
+.debug_info          38001           0
+.debug_abbrev        11815           0
+.debug_loclists      59864           0
+.debug_aranges        1016           0
+.debug_rnglists       4711           0
+.debug_line          88629           0
+.debug_str            3034           0
+.debug_line_str       1647           0
+.debug_frame          1488           0
+Total             15997745
+
+

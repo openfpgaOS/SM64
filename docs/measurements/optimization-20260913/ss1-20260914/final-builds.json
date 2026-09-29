@@ -1,0 +1,22 @@
+{
+  "/home/alberto/Repos/SM64/.obj/sm64/app.elf": {
+    "sha256": "eb39d5e8b208a4db7d2f44c1ff35126cd2936756790b6f3208a49c4701976f93",
+    "bytes": 13588316
+  },
+  "/home/alberto/Repos/SM64/.obj/sm64-profile/app.elf": {
+    "sha256": "9e550d36ae9a20fdd4efa5e993cfa2be42ca04c13b4d6e8527febb0a0bc17e36",
+    "bytes": 13581792
+  },
+  "/home/alberto/Repos/SM64/build/pocket/sm64/Assets/sm64/common/sm64.elf": {
+    "sha256": "eb39d5e8b208a4db7d2f44c1ff35126cd2936756790b6f3208a49c4701976f93",
+    "bytes": 13588316
+  },
+  "/home/alberto/Repos/SM64/src/sm64/sm64/src/pc/ultra_reimplementation.c": {
+    "sha256": "fa83f454cffc1c7f23f5da25a6605830a051aef476d6c0213398c7818c7cb451",
+    "bytes": 5253
+  },
+  "/home/alberto/.cache/sm64-optimization-20260913/hardware/normal-savefix-boot.vhd": {
+    "sha256": "8a84eb82b94578771227971100da248b5905d681dd64ccfba989a1c6899982ae",
+    "bytes": 50331648
+  }
+}

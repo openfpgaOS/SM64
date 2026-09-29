@@ -1,0 +1,52 @@
+LicenseRef-Nintendo-SM64-NoLicense
+=================================
+
+THIS IS NOT A LICENSE. It is a statement of fact about material in this
+repository for which NO LICENSE HAS BEEN GRANTED BY ANYONE.
+
+What this identifier marks
+--------------------------
+
+Files under src/sm64/sm64/ that are derived from Nintendo's Super Mario 64
+(Nintendo 64, 1996) by decompilation, disassembly, or data extraction. This
+includes, but is not limited to:
+
+  * the decompiled game C sources and headers (src/, actors/, levels/,
+    include/ other than include/PR/, data/, text/, assets/)
+  * hand-written and generated assembly derived from the retail ROM (asm/)
+  * data tables describing the contents and byte offsets of the retail ROM
+    (assets.json, assets/demo_data.json)
+  * the sound bank and sequence descriptions (sound/sequences.json,
+    sound/sound_banks/*.json, sound/*), which describe Nintendo's audio data
+  * any other file whose content is a transcription of, or a description of
+    the internal layout of, the retail ROM
+
+Copyright status
+----------------
+
+Super Mario 64 is Copyright (C) Nintendo Co., Ltd. All rights reserved.
+Nintendo is a trademark of Nintendo Co., Ltd. Neither this project nor its
+authors are affiliated with, endorsed by, or sponsored by Nintendo.
+
+Nintendo has granted no license of any kind covering this material. The
+upstream sources this repository vendors -- the n64decomp/sm64 decompilation
+and the sm64-port / sm64-port "dos" forks derived from it -- ship NO license
+file at their repository root and make NO license grant themselves. The
+decompilation contributors have likewise published no license terms.
+
+Consequently:
+
+  * There is no permission, from any rights holder, to copy, modify, or
+    redistribute this material. It is present here on the same basis as it is
+    present in the upstream decompilation repositories, and is redistributed
+    at the redistributor's own risk.
+  * The Apache-2.0 grant that this project makes for its OWN work does NOT
+    and CANNOT extend to this material. This project holds no rights in it
+    and grants none.
+  * No copyrightable game media (textures, audio samples, level geometry,
+    the ROM itself) is committed to this repository. Such media must be
+    extracted at build time from a copy of the retail ROM (baserom.us.z64)
+    that the person building already lawfully owns.
+
+If you are a rights holder and believe material here should not be
+distributed, please contact the repository owner.

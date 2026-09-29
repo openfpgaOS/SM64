@@ -80,34 +80,13 @@
  * ~1 bit of headroom; pushing toward 16384 buys only one more bit. */
 #define ZI_DERIVE_TARGET    8192.0f
 
-/* Decal (G_ZMODE_DEC) depth bias toward the camera, as a multiplier on the
- * decoupled depth df = (1/w)*2^30.  The GPU float-compresses df to a 16-bit code
- * (5-bit exp + 11-bit mantissa, ~0.05% per code), so this multiplier is a
- * ~constant code offset of ~(BIAS-1)*2048 codes regardless of distance.
- *
- * Shadows/signs/paintings are decals meant to sit ON a surface and win its
- * z-test.  SM64's tree shadows are 9-vertex TERRAIN-FOLLOWING discs overlaid on
- * the coarser ground mesh, so a flat shadow triangle dips below a curved ground
- * triangle by a depth that varies with camera distance/angle — and since the
- * offset is near-uniform across the (near-coplanar) shadow, the WHOLE shadow
- * flips visible/hidden ("pops").  1.003 (~6 codes / ~0.3%) was too weak to cover
- * those dips.  TUNE on hardware: raise if shadows still pop; lower if a decal
- * pokes through geometry just in front of it (e.g. the shadow over Mario's
- * feet).  The principled fix is an RTL N64-style decal tolerance band, but this
- * constant is app-only (fast: make + make copy + cold boot, no bitstream). */
-#define DECAL_Z_BIAS        1.012f
-
-/* Slope-scaled decal bias (glPolygonOffset "factor" / N64 dz term): push the
- * decal toward the camera by this many pixels' worth of the per-pixel depth
- * GRADIENT, on top of the flat DECAL_Z_BIAS floor.  A flat-on decal (a sign, a
- * painting frame, Mario's shadow under an overhead camera) has a tiny gradient
- * so the floor dominates and it's stable.  A ground decal viewed at a GRAZING
- * angle (tree/object shadows on sloped or distant terrain) has a large per-pixel
- * depth change, so the bias auto-scales up to match — which a flat constant
- * (any DECAL_Z_BIAS) cannot, and is why bumping the constant didn't stop the
- * shadows popping.  TUNE on hardware: raise if shadows still pop at grazing
- * angles; lower if a decal lifts off / pokes through at steep angles. */
-#define DECAL_SLOPE_PIXELS  4.0f
+/* Give decals a small offset for quantized depth and screen coordinates.
+ * A 0.1% relative offset covers a few compressed depth codes; the half-pixel
+ * slope allowance handles differently tessellated receiver surfaces. Large
+ * offsets lift ground shadows in front of character geometry: the previous
+ * 1.2% plus four-pixel offset darkened Mario's overalls and Bowser's feet. */
+#define DECAL_Z_BIAS        1.001f
+#define DECAL_SLOPE_PIXELS  0.5f
 
 #define MAX_TEX     4096
 #define MAX_SHADERS 64
@@ -130,6 +109,12 @@ static inline void rgb332_expand(uint8_t i, int *r, int *g, int *b) {
     *b = (b2 << 6) | (b2 << 4) | (b2 << 2) | b2;
 }
 
+/* Mirrors gfx_pc.c's SCALE_5_8 (5-bit -> 8-bit channel widening).  Kept in sync
+ * by construction: both are the exact multiply-shift form of (v * 0xFF) / 0x1F,
+ * bit-identical for every 5-bit input.  Used by the RGBA16 direct upload below,
+ * which must reproduce gfx_pc's two-stage result exactly. */
+#define SCALE_5_8_GPU(V_) (((V_) * 1053u) >> 7)
+
 static inline uint16_t rgba_to_565(int r, int g, int b) {
     if (r < 0) r = 0; else if (r > 255) r = 255;
     if (g < 0) g = 0; else if (g > 255) g = 255;
@@ -144,6 +129,8 @@ static inline uint16_t rgba_to_565(int r, int g, int b) {
 struct GTex {
     uint8_t  *ci8;          /* current pixel buffer = slot[cur]; NULL until first upload */
     uint8_t  *slot[2];      /* double-buffered store: a re-upload lands in the OTHER slot */
+    uint8_t  *alpha_mask[2]; /* complementary binary-alpha texture, built on demand */
+    uint32_t  slot_epoch[2]; /* last GPU use, for safe reuse within a frame */
     uint32_t  slotcap[2];   /* allocated bytes per slot */
     uint8_t   cur;          /* which slot ci8 / addr currently point at */
     uint16_t  w, h;
@@ -154,6 +141,7 @@ struct GTex {
 
 struct ShaderProgram {
     uint32_t shader_id;
+    struct ShaderProgram *next;
     struct CCFeatures cc;
     int stride;             /* floats per vertex in buf_vbo */
     int coff;               /* float offset of first colour input (RGB) */
@@ -162,10 +150,12 @@ struct ShaderProgram {
 
 static struct GTex   g_tex[MAX_TEX];
 static uint32_t      g_tex_count;
+static uint32_t      g_tex_epoch = 1;
 static struct GTex  *g_cur_tex[2];
 static int           g_cur_tmu;
 
 static struct ShaderProgram g_shaders[MAX_SHADERS];
+static struct ShaderProgram *g_extra_shaders;
 static int           g_shader_count;
 static struct ShaderProgram *g_cur_shader;
 
@@ -177,13 +167,72 @@ static uint16_t     *g_zbuf;
 static int           g_draw_idx;
 static uint32_t      g_draw_fb;
 static int           g_fb_active;
+static uint32_t      g_flip_token;   /* GPU fence of the last submitted flip */
+static int           g_flip_pending; /* flip submitted, buffer not yet re-acquired */
+
+/* Split the old single "present" number into its two halves, because they have
+ * completely different cures: flip = submitting the flip command (CPU work),
+ * acq = of_video_acquire_next blocking until a draw buffer frees (pure idle --
+ * a display-cadence / OS-side wait the app cannot shorten, only overlap). */
+#if defined(TARGET_OPENFPGA) && !defined(OF_PC)
+#define PROF_PRESENT_TMR() (*(volatile uint32_t *)0x40000004)
+static uint32_t prof_flip_ticks, prof_acq_ticks, prof_flip_t0, prof_acq_t0;
+#define PROF_FLIP_BEGIN()  (prof_flip_t0 = PROF_PRESENT_TMR())
+#define PROF_FLIP_END()    (prof_flip_ticks += PROF_PRESENT_TMR() - prof_flip_t0)
+#define PROF_ACQ_BEGIN()   (prof_acq_t0 = PROF_PRESENT_TMR())
+#define PROF_ACQ_END()     (prof_acq_ticks += PROF_PRESENT_TMR() - prof_acq_t0)
+#else
+#define PROF_FLIP_BEGIN()  ((void)0)
+#define PROF_FLIP_END()    ((void)0)
+#define PROF_ACQ_BEGIN()   ((void)0)
+#define PROF_ACQ_END()     ((void)0)
+#endif
 static int           g_has_gpu;
 static int           g_truecolor;       /* RGB565 direct-color path (OF_HW_GPU_VCOLOR) */
 static int           g_combine;         /* full texel*C+D combiner (OF_HW_GPU_COMBINE);
                                          * 0 on the lean os30 (EXCLUDE_COMBINE) -> HILITE
                                          * surfaces fall back to plain texel*shade */
+/* Compile-time kill switch for the 0x56/0x54 vertex-cache fast path: build with
+ * -DGFX_GPU_VTX_CACHE=0 to force the legacy per-triangle 0x4E stream even on a
+ * bitstream that advertises OF_HW_GPU_CLIP_LOAD (byte-identical old behavior). */
+#ifndef GFX_GPU_VTX_CACHE
+#define GFX_GPU_VTX_CACHE 1
+#endif
+static int           g_clip_load;       /* 0x56 clip-load + 0x54 indexed-tri available
+                                         * (OF_HW_GPU_VERT_TRI && OF_HW_GPU_CLIP_LOAD) */
+
+/* ---- vertex-cache (0x56/0x54) sticky-state + per-frame wire counters ----
+ * g_vc_state_dirty is an ELIGIBILITY-MEMO invalidator ONLY: set by every rapi
+ * setter that feeds an eligibility ingredient (shader, texture binding/upload,
+ * decal, z-write, alpha, viewport/scissor) and at frame start, cleared when
+ * gfx_gpu_vtx_cache_begin re-derives the verdict.  It plays NO part in 0x4A
+ * EMISSION coherence any more (round-4 audit): the wire's sticky-state truth
+ * is emit_tri_state's shared g_st_cache memo, which BOTH paths build against
+ * and update on every emit attempt. */
+static int      g_vc_state_dirty = 1;
+static int      g_vc_elig;           /* memoized verdict for the current material */
+static int      g_vc_textured;       /* memoized: batch samples a real texture */
+static int      g_vc_rgb_input;      /* memoized: shade colour input (-1 = white) */
+static int      g_vc_alpha_input;    /* memoized: surface-alpha input (-1 = 255) */
+static float    g_vc_vp[4];          /* last-programmed 0x50 viewport (cx,cy,hw,hh) */
+static int      g_vc_vp_valid;
+static uint32_t g_vc_kick;           /* cached tris since the last of_gpu_kick */
+static uint32_t g_vc_words;          /* per-frame ring words emitted (draw path) */
+static uint32_t g_vc_tris_cached;    /* per-frame tris drawn via 0x54 */
+static uint32_t g_vc_tris_legacy;    /* per-frame tris drawn via 0x4E/0x4B */
+static uint32_t g_vc_loads;          /* per-frame 0x56 vertex uploads */
+
+/* Pre-scale on the 0x56 slot clip words cx/cy/cw (and, coherently, on the
+ * fallback projection in gpu_draw_triangles) — see the rationale at the
+ * upload site in gfx_gpu_vtx_cache_tri. */
+#define VC_W_PRESCALE (1.0f / 256.0f)
+
+/* Original clip coordinates for cached/fallback projection coherence. */
+struct gfx_vc_true_xyw gfx_vc_true[GFX_VC_MAX_BUFFERED];
 static int           g_fb_bpp = 1;      /* framebuffer bytes/pixel (1 CI8, 2 RGB565) */
-static uint16_t      g_white_tex;       /* 1x1 white RGB565 for untextured truecolor */
+/* 1x1 white RGB565 for untextured truecolor; owns its whole cache line so no
+ * CPU-written neighbour's writeback can land on the texel the GPU samples. */
+static uint16_t      g_white_tex[32] __attribute__((aligned(64)));
 static uint32_t      g_white_addr;
 
 /* viewport (NDC -> screen), set by set_viewport — mirrors gfx_soft */
@@ -197,6 +246,18 @@ static int g_z_test, g_z_write;
 /* sticky-state dedup: skip re-emitting an identical SET_TRI_STATE. */
 static of_gpu_tri_state_t g_st_cache;
 static int g_st_cache_valid;
+static int g_tri_state_dirty = 1;
+static int g_st_textured, g_st_cd, g_st_subpix, g_st_alpha_mask;
+static int g_alpha_mask;
+static uint8_t g_st_alpha;
+
+/* Every material setter invalidates both eligibility and the shared state
+ * memo. Dynamic per-draw fields are checked in emit_tri_state itself, so
+ * cached triangles, clipped fallbacks and rectangles can safely alternate. */
+static void gpu_material_changed(void) {
+    g_vc_state_dirty = 1;
+    g_tri_state_dirty = 1;
+}
 
 /* ================================================================
  * Boot: palette, colormap, ramp, z-buffer, first draw buffer
@@ -235,12 +296,45 @@ void gfx_gpu_boot(void) {
      * (cd_on stays 0) so HILITE surfaces emit plain RGB565 texel*shade instead of
      * the biased-C/D payload the gated GPU would mis-read. */
     g_combine = g_truecolor && of_has_feature(OF_HW_GPU_COMBINE);
+    /* Vertex-cache fast path: 0x56 LOAD_VERT_CLIP + 0x54 DRAW_INDEXED_TRI.
+     * Caps-only here (per-batch eligibility additionally requires truecolor,
+     * which can still be downgraded below if the RGB565 mode is rejected). */
+    g_clip_load = GFX_GPU_VTX_CACHE && g_has_gpu &&
+                  of_has_feature(OF_HW_GPU_VERT_TRI) &&
+                  of_has_feature(OF_HW_GPU_CLIP_LOAD);
+#ifndef OF_PC
+    /* One-shot capability dump.  XFORM decides whether the GPU transform
+     * front-end is reachable: 0x50 (sticky matrix) + 0x53 LOAD_VERTS (transform
+     * one vert into a 32-slot GPU vertex cache) + 0x54 DRAW_INDEXED_TRI (ONE
+     * word per triangle).  SM64's display lists are literally "G_VTX loads
+     * 16-32 verts, then G_TRI1/G_TRI2 index them", so that path maps 1:1 and
+     * would cut the per-triangle wire cost from 20 words to ~2 — which attacks
+     * the ring-full backpressure that dominates `emit` — and stop re-projecting
+     * every shared vertex once per triangle that uses it.
+     *
+     * of_gpu.h has advertised APIs the shipped os30 bitstream does not
+     * implement before (CHANUTIL), so this is a claim to verify, not a promise:
+     * read XFORM below on real hardware BEFORE building anything on it. */
+    { extern int printf(const char *fmt, ...);
+      /* cpu_freq_hz also settles the PERF scale: gfx_pc.c divides PROF ticks by
+       * 110000 to get ms.  If the CPU (and so the 0x40000004 counter) runs at
+       * 100 MHz, every printed ms is ~10% LOW and every fps ~10% HIGH. */
+      printf("[SM64] gpu caps=%08x cpu=%uHz  truecolor=%d combine=%d XFORM=%d "
+             "TRI_RECS=%d FAST_TEX=%d CLIP_LOAD=%d\n",
+             (unsigned)(caps ? caps->hw_features : 0u),
+             (unsigned)(caps ? caps->cpu_freq_hz : 0u), g_truecolor, g_combine,
+             of_has_feature(OF_HW_GPU_XFORM_RGB) ? 1 : 0,
+             of_has_feature(OF_HW_GPU_PARAM_TRI_RECS) ? 1 : 0,
+             of_has_feature(OF_HW_GPU_FAST_TEX) ? 1 : 0, g_clip_load); }
+#endif
     /* Always set the RGB332 palette: harmless under RGB565 scanout (ignored),
      * and the safety net if the RGB565 mode switch is rejected below. */
     build_palette();
 
     if (g_has_gpu) {
         of_gpu_init();
+        /* Supported cores accept cached command batches directly into BRAM. */
+        of_gpu_use_cpu_ring();
 
         if (g_truecolor) {
             /* Direct color needs the scanout in RGB565.  Request it AND verify
@@ -256,7 +350,7 @@ void gfx_gpu_boot(void) {
             of_video_get_mode(&cur);
             if (cur.color_mode == OF_VIDEO_MODE_RGB565) {
                 g_fb_bpp = 2;
-                g_white_tex = 0xFFFF;   /* 1x1 white texel for untextured tris */
+                g_white_tex[0] = 0xFFFF; /* 1x1 white texel for untextured tris */
                 /* The GPU DMA-fetches this texel straight from SDRAM.  A ONE-TIME
                  * cbo.flush at init is writeback-timing-fragile (cache.c documents
                  * that cbo.flush does not wait for the d_axi writeback to reach DRAM;
@@ -268,9 +362,9 @@ void gfx_gpu_boot(void) {
                  * = "almost black head with some sheen".  Write the texel through the
                  * UNCACHED SDRAM alias so DRAM is guaranteed white before the first
                  * fetch — the reliable path cache.c prescribes for HW-read buffers. */
-                *(volatile uint16_t *)of_uncached(&g_white_tex) = 0xFFFF;
-                of_cache_flush_range(&g_white_tex, sizeof(g_white_tex));
-                g_white_addr = (uint32_t)(uintptr_t)&g_white_tex;
+                *(volatile uint16_t *)of_uncached(g_white_tex) = 0xFFFF;
+                of_cache_flush_range(g_white_tex, sizeof(g_white_tex));
+                g_white_addr = (uint32_t)(uintptr_t)g_white_tex;
             } else {
                 g_truecolor = 0;        /* RGB565 unavailable → palettized */
             }
@@ -297,55 +391,19 @@ void gfx_gpu_boot(void) {
     }
 }
 
-#ifdef TARGET_OPENFPGA
-/* One-shot FB-dump instrumentation (translucency-stripes investigation).
- * At frame 250 (the intro letter is on screen), wait for the just-submitted
- * frame to FULLY render (fence token), then write its raw RGB565 bytes to
- * the nonvolatile file "sm64_9.sav" — save slot 19, already DECLARED and
- * bound by the instance json (Assets/sm64/ThinkElastic.SM64/sm64.json);
- * on the Pocket a file only reaches SD through a data slot.  This
- * exfiltrates the REAL framebuffer: stripes present in the dump = the
- * corruption is in memory (and the exact bytes fingerprint the mechanism);
- * dump clean while the screen stripes = display-path effect.  The close
- * write-through (sys_close -> nvslot flush) persists immediately — no
- * clean exit required.  Remove after the investigation. */
-#include <stdio.h>
-static uint32_t of_fbdump_frames;
-static void of_fbdump(const void *fb, uint32_t token, int slot) {
-    static const char *names[5] = { "sm64_5.sav", "sm64_6.sav", "sm64_7.sav",
-                                    "sm64_8.sav", "sm64_9.sav" };
-    of_gpu_wait(token);
-    FILE *fp = fopen(names[slot], "wb");
-    if (!fp) return;
-    fwrite(of_uncached((void *)(uintptr_t)fb), 1,
-           (size_t)SCR_W * SCR_H * 2, fp);
-    fclose(fp);
-}
-#endif
-
 void gfx_gpu_present(void) {
     if (!g_has_gpu) {
         of_video_flip();
         return;
     }
-    uint32_t token = of_gpu_flip_to(g_draw_idx);
+    /* Submit the flip and return.  The wait for the next free draw buffer is
+     * deferred to gpu_start_frame() so the CPU can do useful work during it --
+     * see the note there. */
+    PROF_FLIP_BEGIN();
+    g_flip_token = of_gpu_flip_to(g_draw_idx);
     of_gpu_kick();
-#ifdef TARGET_OPENFPGA
-    /* Rotating dump: every 300 frames forever, cycling save slots 15-19
-     * (sm64_5..9.sav) — the card always ends up holding the LAST five
-     * captures (~last 100 s of play), so any run that reaches a striped
-     * scene and lingers ~20 s leaves its framebuffer on the card. */
-    ++of_fbdump_frames;
-    if (of_fbdump_frames >= 250 && (of_fbdump_frames - 250) % 300 == 0)
-        of_fbdump(of_video_buffer_addr(g_draw_idx), token,
-                  (int)(((of_fbdump_frames - 250) / 300) % 5));
-#endif
-    g_draw_idx = of_video_acquire_next(g_draw_idx, token);
-    g_draw_fb = (uint32_t)(uintptr_t)of_video_buffer_addr(g_draw_idx);
-    if (!g_fb_active) {
-        g_fb_active = 1;
-        of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
-    }
+    g_flip_pending = 1;
+    PROF_FLIP_END();
 }
 
 /* ================================================================
@@ -361,14 +419,29 @@ static int shader_stride(const struct CCFeatures *cc) {
 }
 
 static struct ShaderProgram *gpu_create_and_load_new_shader(uint32_t shader_id) {
-    struct ShaderProgram *p = &g_shaders[g_shader_count++ % MAX_SHADERS];
+    /* Combiners retain shader pointers. Recycling a live slot changes its
+     * stride underneath buffered vertices. Keep the usual shaders inline
+     * and allocate stable overflow entries only when that pool fills. */
+    struct ShaderProgram *p;
+    const int overflow = g_shader_count == MAX_SHADERS;
+    if (overflow) {
+        p = malloc(sizeof(*p));
+        if (!p) abort();
+    } else {
+        p = &g_shaders[g_shader_count++];
+    }
     memset(p, 0, sizeof(*p));
+    if (overflow) {
+        p->next = g_extra_shaders;
+        g_extra_shaders = p;
+    }
     p->shader_id = shader_id;
     gfx_cc_get_features(shader_id, &p->cc);
     p->stride = shader_stride(&p->cc);
     p->coff = 4 + (p->cc.used_textures[0] ? 2 : 0) + (p->cc.opt_fog ? 1 : 0);
     p->used = 1;
     g_cur_shader = p;
+    gpu_material_changed();
     return p;
 }
 
@@ -376,11 +449,14 @@ static struct ShaderProgram *gpu_lookup_shader(uint32_t shader_id) {
     for (int i = 0; i < g_shader_count && i < MAX_SHADERS; i++)
         if (g_shaders[i].used && g_shaders[i].shader_id == shader_id)
             return &g_shaders[i];
+    for (struct ShaderProgram *p = g_extra_shaders; p; p = p->next)
+        if (p->shader_id == shader_id)
+            return p;
     return NULL;
 }
 
-static void gpu_load_shader(struct ShaderProgram *prg)  { g_cur_shader = prg; }
-static void gpu_unload_shader(struct ShaderProgram *old) { (void)old; g_cur_shader = NULL; }
+static void gpu_load_shader(struct ShaderProgram *prg)  { g_cur_shader = prg; gpu_material_changed(); }
+static void gpu_unload_shader(struct ShaderProgram *old) { (void)old; g_cur_shader = NULL; gpu_material_changed(); }
 
 static void gpu_shader_get_info(struct ShaderProgram *prg, uint8_t *num_inputs,
                                 bool used_textures[2]) {
@@ -416,16 +492,17 @@ static void gpu_select_texture(int tile, uint32_t texture_id) {
     if (texture_id >= MAX_TEX) texture_id = MAX_TEX - 1;
     g_cur_tmu = tile & 1;
     g_cur_tex[g_cur_tmu] = &g_tex[texture_id];
+    gpu_material_changed();
 }
 
 /* One RGBA32 source pixel -> GPU texel.  a<0x80 -> 0 transparent (SKIP_ZERO);
- * in 565 an opaque true-black texel is nudged to 0x0008 so it can't collide
+ * in 565 an opaque true-black texel is nudged to 0x0001 so it can't collide
  * with the transparent key. */
 static inline uint16_t tex565_texel(const uint8_t *rgba32, uint32_t i) {
     uint8_t r = rgba32[i * 4 + 0], g = rgba32[i * 4 + 1];
     uint8_t b = rgba32[i * 4 + 2], a = rgba32[i * 4 + 3];
     uint16_t c = (a < 0x80) ? 0x0000 : rgba_to_565(r, g, b);
-    if (a >= 0x80 && c == 0x0000) c = 0x0008;
+    if (a >= 0x80 && c == 0x0000) c = 0x0001;
     return c;
 }
 
@@ -435,42 +512,111 @@ static inline uint8_t tex332_texel(const uint8_t *rgba32, uint32_t i) {
     return (a < 0x80) ? 0 : rgb332(r, g, b);
 }
 
+/* One N64 RGBA16 texel (RGB5551, big-endian) -> RGB565, direct.
+ * Identical output to expanding through RGBA8888 and calling tex565_texel:
+ * SCALE_5_8 followed by >>3 is the identity on a 5-bit field, so r5 and b5 land
+ * unchanged and only green widens 5->6.  a=0 is the transparent key (SKIP_ZERO);
+ * an opaque texel that lands on 0x0000 is nudged to 0x0001 so it can't collide
+ * with that key.  Verified equal for all 65536 inputs. */
+static inline uint32_t tex565_from_rgba16(const uint8_t *p) {
+    uint32_t col16 = ((uint32_t)p[0] << 8) | p[1];
+    if (!(col16 & 1u)) return 0u;                       /* transparent */
+    uint32_t g6 = (uint32_t)(SCALE_5_8_GPU((col16 >> 6) & 0x1fu) >> 2);
+    uint32_t c  = (col16 & 0xF800u) | (g6 << 5) | ((col16 >> 1) & 0x1fu);
+    return c ? c : 0x0001u;
+}
+
+/* Texture storage owns complete cache lines. A cached read after flushing
+ * drains writeback on the same AXI master before uncached pixel stores begin.
+ * Reused storage is only accessed through its uncached alias. */
+static uint8_t *gpu_tex_alloc(uint32_t bytes) {
+    uint32_t capacity = (bytes + 63u) & ~63u;
+    void *storage = NULL;
+    if (posix_memalign(&storage, 64, capacity) != 0) return NULL;
+    uint8_t *p = storage;
+    of_cache_flush_range(p, capacity);
+    for (uint32_t i = 0; i < capacity; i += 64)
+        (void)*(volatile uint8_t *)(p + i);
+    return p;
+}
+
+static int gpu_tex_slot_begin(struct GTex *t, uint32_t bytes) {
+    if (bytes == 0 || bytes > UINT32_MAX - 63u) return 0;
+    uint8_t slotc = t->cur ^ 1u;
+    /* Two buffers cover the usual upload pattern. A third use in the same
+     * frame must wait before overwriting pixels still referenced by commands.
+     * Earlier frames have retired: gpu_start_frame waits for their flip. */
+    if (t->slot_epoch[slotc] == g_tex_epoch) {
+        of_gpu_finish();
+        for (uint32_t i = 0; i < g_tex_count; i++)
+            g_tex[i].slot_epoch[0] = g_tex[i].slot_epoch[1] = 0;
+        t->slot_epoch[slotc] = 0;
+    }
+    if (t->slot[slotc] == NULL || t->slotcap[slotc] < bytes) {
+        uint8_t *fresh = gpu_tex_alloc(bytes);
+        if (!fresh) return 0;
+        free(t->slot[slotc]);
+        t->slot[slotc] = fresh;
+        t->slotcap[slotc] = (bytes + 63u) & ~63u;
+    }
+    free(t->alpha_mask[slotc]);
+    t->alpha_mask[slotc] = NULL;
+    t->cur = slotc;
+    t->ci8 = t->slot[slotc];
+    return 1;
+}
+
+/* Uploads change SDRAM behind the GPU's private texture cache. The flush
+ * request drains outstanding cache responses before invalidating its tags. */
+static void gpu_tex_publish(void) {
+#ifndef OF_PC
+    __asm__ volatile("fence" ::: "memory");
+#endif
+    GPU_TEX_FLUSH = 1;
+}
+
+/* BLENDRGBFADEA selects SHADE where texel alpha is zero and TEXEL where it
+ * is one. Disjoint masks retain that behavior even during a surface fade:
+ * each covered pixel blends exactly once with the framebuffer. */
+static int gpu_tex_alpha_mask(struct GTex *t) {
+    if (!t || !t->ci8) return 0;
+    if (t->alpha_mask[t->cur]) return 1;
+    uint32_t n = (uint32_t)t->w * t->h;
+    uint8_t *p = gpu_tex_alloc(n * 2u);
+    if (!p) return 0;
+    const volatile uint16_t *src = of_uncached(t->ci8);
+    volatile uint16_t *dst = of_uncached(p);
+    for (uint32_t i = 0; i < n; i++) dst[i] = src[i] == 0 ? 0xffff : 0;
+    t->alpha_mask[t->cur] = p;
+    gpu_tex_publish();
+    return 1;
+}
+
+/* Publish the freshly written slot: dims, wrap masks, GPU-visible address.
+ * Power-of-two dims use the GPU's bitmask wrap; non-power-of-two dims set a
+ * no-op 0xFFFF mask and engage the GPU's real clamp unit (in emit_tri_state)
+ * instead.  The bitmask `s & (width-1)` corrupts non-pow2 widths (e.g. the
+ * 80x20 title/ending/game-over backgrounds: s & 0x4F drops bits 16/32),
+ * collapsing the image into a garbled band — the "texture zoomed/cropped inside
+ * the rect" symptom.  SM64's non-pow2 textures are all G_TX_CLAMP.
+ * No trailing cache flush: texels went to DRAM via the uncached alias, and
+ * flushing here would only re-write-back stale (clean) lines. */
+static void gpu_tex_slot_finish(struct GTex *t, int width, int height) {
+    t->w = (uint16_t)width;
+    t->h = (uint16_t)height;
+    t->wmask = ((width  & (width  - 1)) == 0) ? (uint16_t)(width  - 1) : 0xFFFF;
+    t->hmask = ((height & (height - 1)) == 0) ? (uint16_t)(height - 1) : 0xFFFF;
+    t->addr = (uint32_t)(uintptr_t)t->ci8;
+    gpu_tex_publish();
+    gpu_material_changed();    /* new tex_addr must reach the sticky 0x4A */
+}
+
 static void gpu_upload_texture(const uint8_t *rgba32, int width, int height) {
     struct GTex *t = g_cur_tex[g_cur_tmu];
     uint32_t n = (uint32_t)width * (uint32_t)height;
     uint32_t bytes = n * (uint32_t)g_fb_bpp;   /* 1 byte CI8 / 2 bytes RGB565 */
     if (n == 0) return;
-    /* Double-buffer the pixel store to kill an ABA texture-content race: the os30
-     * GPU reads texels from t->addr (SDRAM) ASYNCHRONOUSLY with NO render-path
-     * fence, so re-uploading a texture-cache-recycled slot IN PLACE would
-     * overwrite bytes that in-flight triangles of THIS frame are still sampling
-     * -> wrong texture (worst on animated characters, which churn many small
-     * part-textures and wrap the gfx_pc texture cache mid-frame).  Writing the new
-     * pixels into the OTHER slot keeps the address the GPU is still reading valid;
-     * later triangles re-point to the fresh slot via the new t->addr (emit_tri_state
-     * re-emits because tex_addr changed).  Caps are retained, so steady state does
-     * zero extra allocs and adds no GPU stall. */
-    uint8_t slotc = t->cur ^ 1u;
-    if (t->slot[slotc] == NULL || t->slotcap[slotc] < bytes) {
-        free(t->slot[slotc]);
-        t->slot[slotc] = malloc(bytes);
-        t->slotcap[slotc] = bytes;
-    }
-    t->cur = slotc;
-    t->ci8 = t->slot[slotc];
-    /* Clean any dirty CACHED lines for this buffer FIRST (heap reuse can
-     * leave them; a later eviction would clobber what we write below), then
-     * store the texels through the UNCACHED SDRAM alias.  cbo.flush alone is
-     * not durable — cache.c documents that it does not wait for the d_axi
-     * writeback to reach DRAM — and the GPU fetches these texels
-     * asynchronously as soon as the next triangle batch issues.  Losing that
-     * race samples the buffer's PREVIOUS contents: another texture on
-     * character parts (the "texture repeating across surfaces" artifact —
-     * character part-textures are re-imported and drawn within microseconds,
-     * world textures upload once and had ages to drain).  Uncached stores
-     * are the reliable path cache.c prescribes for HW-read buffers (see the
-     * white-tex init above); word-packed to cut the transaction count. */
-    of_cache_flush_range(t->ci8, bytes);
+    if (!gpu_tex_slot_begin(t, bytes)) return;
     if (g_truecolor) {
         volatile uint32_t *dw = (volatile uint32_t *)of_uncached(t->ci8);
         uint32_t i = 0;
@@ -493,19 +639,48 @@ static void gpu_upload_texture(const uint8_t *rgba32, int width, int height) {
         for (; i < n; i++)
             ((volatile uint8_t *)dw)[i] = tex332_texel(rgba32, i);
     }
-    t->w = (uint16_t)width;
-    t->h = (uint16_t)height;
-    /* Power-of-two dims use the GPU's bitmask wrap; non-power-of-two dims set a
-     * no-op 0xFFFF mask and engage the GPU's real clamp unit (in emit_tri_state)
-     * instead.  The bitmask `s & (width-1)` corrupts non-pow2 widths (e.g. the
-     * 80x20 title/ending/game-over backgrounds: s & 0x4F drops bits 16/32),
-     * collapsing the image into a garbled band — the "texture zoomed/cropped
-     * inside the rect" symptom.  SM64's non-pow2 textures are all G_TX_CLAMP. */
-    t->wmask = ((width  & (width  - 1)) == 0) ? (uint16_t)(width  - 1) : 0xFFFF;
-    t->hmask = ((height & (height - 1)) == 0) ? (uint16_t)(height - 1) : 0xFFFF;
-    t->addr = (uint32_t)(uintptr_t)t->ci8;
-    /* No trailing flush: texels went to DRAM via the uncached alias above,
-     * and flushing here would only re-write-back stale (clean) lines. */
+    gpu_tex_slot_finish(t, width, height);
+}
+
+/* ── RGBA16 direct upload (fast path) ─────────────────────────────────────
+ * The generic upload_texture contract is RGBA8888, so an N64 RGBA16 texture used
+ * to be expanded to RGBA8888 in a stack buffer by gfx_pc.c's import_texture_rgba16
+ * and immediately squeezed back down to RGB565 here: ~10 bytes of memory traffic
+ * per texel (2 read + 4 written + 4 read back + 2 written) to move 2 bytes, plus
+ * a stack buffer big enough to evict the whole D-cache.  Truecolor is already
+ * 16-bit, so convert in ONE pass straight from the ROM texels.
+ *
+ * BIT-IDENTICAL to the old two-stage chain, brute-force verified over all 65536
+ * RGBA16 inputs: r5 and b5 pass straight through (SCALE_5_8 then >>3 is the
+ * identity on 5 bits), only green needs the 5->6 widening, and the alpha bit
+ * still keys transparency with the same 0x0000 -> 0x0001 nudge for opaque black.
+ *
+ * Returns 0 (caller falls back to upload_texture) when the framebuffer is not
+ * 16-bit, i.e. the palettized path, whose texel is a CI8 palette index. */
+static int gpu_upload_texture_rgba16(const uint8_t *src, int width, int height) {
+    if (!g_truecolor)
+        return 0;
+    struct GTex *t = g_cur_tex[g_cur_tmu];
+    uint32_t n = (uint32_t)width * (uint32_t)height;
+    if (n == 0) return 1;
+    if (!gpu_tex_slot_begin(t, n * 2u))
+        return 1;
+
+    volatile uint32_t *dw = (volatile uint32_t *)of_uncached(t->ci8);
+    uint32_t i = 0;
+    /* Two texels per uncached 32-bit store: each store is a separate transaction
+     * on a single-outstanding bus, so halving their count matters more than the
+     * arithmetic does. */
+    for (; i + 1 < n; i += 2) {
+        uint32_t c0 = tex565_from_rgba16(src + i * 2);
+        uint32_t c1 = tex565_from_rgba16(src + i * 2 + 2);
+        dw[i >> 1] = c0 | (c1 << 16);
+    }
+    if (i < n)
+        ((volatile uint16_t *)dw)[i] = (uint16_t)tex565_from_rgba16(src + i * 2);
+
+    gpu_tex_slot_finish(t, width, height);
+    return 1;
 }
 
 static void gpu_set_sampler_parameters(int tile, bool linear, uint32_t cms,
@@ -515,21 +690,27 @@ static void gpu_set_sampler_parameters(int tile, bool linear, uint32_t cms,
      * unit (non-pow2 / G_TX_CLAMP) and mirror addressing (G_TX_MIRROR). */
     struct GTex *t = g_cur_tex[tile & 1];
     if (t) { t->cms = (uint8_t)cms; t->cmt = (uint8_t)cmt; }
+    gpu_material_changed();
 }
 
-static void gpu_set_depth_test(bool depth_test) { g_z_test = depth_test; }
-static void gpu_set_depth_mask(bool z_upd)       { g_z_write = z_upd; }
+static void gpu_set_depth_test(bool depth_test) { g_z_test = depth_test; gpu_material_changed(); }
+static void gpu_set_depth_mask(bool z_upd)       { g_z_write = z_upd; gpu_material_changed(); }
 static int g_decal;
-static void gpu_set_zmode_decal(bool decal)      { g_decal = decal; }
+static void gpu_set_zmode_decal(bool decal)      { g_decal = decal; gpu_material_changed(); }
+static int g_alpha_cvg;
+static void gpu_set_alpha_cvg_sel(bool sel)      { g_alpha_cvg = sel; gpu_material_changed(); }
 
 static void gpu_set_viewport(int x, int y, int width, int height) {
     g_hw = (float)(width >> 1);
     g_hh = (float)(height >> 1);
     g_cx = (float)x + g_hw;
-    g_cy = (float)y + g_hh;
+    /* RenderingAPI uses bottom-left Y; the framebuffer uses top-left Y. */
+    g_cy = (float)(SCR_H - y - height) + g_hh;
+    gpu_material_changed();   /* also refreshes the sticky 0x50 (dedup'd below) */
 }
 
 static void gpu_set_scissor(int x, int y, int width, int height) {
+    y = SCR_H - y - height;
     int x1 = x + width, y1 = y + height;
     if (x < 0) x = 0;
     if (y < 0) y = 0;
@@ -537,11 +718,12 @@ static void gpu_set_scissor(int x, int y, int width, int height) {
     if (y1 > SCR_H) y1 = SCR_H;
     g_clip_x0 = (int16_t)x;  g_clip_y0 = (int16_t)y;
     g_clip_x1 = (int16_t)x1; g_clip_y1 = (int16_t)y1;
+    gpu_material_changed();
 }
 
 static int     g_use_alpha;
 static uint8_t g_surf_alpha = 255;   /* per-surface src alpha for blending */
-static void gpu_set_use_alpha(bool use_alpha) { g_use_alpha = use_alpha; }
+static void gpu_set_use_alpha(bool use_alpha) { g_use_alpha = use_alpha; gpu_material_changed(); }
 static void gpu_set_fog_color(const uint8_t *rgb) { (void)rgb; }
 
 /* ================================================================
@@ -618,13 +800,15 @@ static int classify_combine_cd(const struct CCFeatures *cc,
 }
 
 /* Resolve a buf_vbo color input (or constant 0) at one vertex into 0..1 floats.
- * f = vertex float base; colors are premultiplied by 1/w, so multiply by w.
- * GFX_DONT_SCALE_COLORS (TARGET_OPENFPGA) stores colors 0..255, so also divide
+ * f = vertex float base.  Colors arrive UN-premultiplied on TARGET_OPENFPGA
+ * (gfx_pc.c's GFX_OUT_PROP is identity there — see the long note on that macro),
+ * so there is no 1/w to undo and the old `w` multiplier is gone.
+ * GFX_DONT_SCALE_COLORS (TARGET_OPENFPGA) stores colors 0..255, so still divide
  * by 255 — the enc_C/enc_D encoders below expect 0..1 (without this the C and D
  * fields saturate and the HILITE head blows out to white). */
-static void cc_val_rgb(const float *f, int coff, int istride, int idx, float w, float out[3]) {
+static void cc_val_rgb(const float *f, int coff, int istride, int idx, float out[3]) {
     if (idx < 0) { out[0] = out[1] = out[2] = 0.0f; return; }
-    const float s = w * (1.0f / 255.0f);
+    const float s = (1.0f / 255.0f);
     out[0] = f[coff + idx * istride + 0] * s;
     out[1] = f[coff + idx * istride + 1] * s;
     out[2] = f[coff + idx * istride + 2] * s;
@@ -656,79 +840,52 @@ static inline uint8_t enc_D6(float d) {   /* unsigned 6-bit 0..63 */
     return (uint8_t)v;
 }
 
+/* Does the RGB colour cycle consume a per-vertex colour input?  (See the long
+ * texel-only-white note at the use site in gpu_draw_triangles.)  Shared by the
+ * 0x4E path and the vertex-cache path so both encode the identical rgb565. */
+static inline int cc_rgb_has_input(const struct CCFeatures *cc) {
+    return (cc->c[0][0] >= SHADER_INPUT_1 && cc->c[0][0] <= SHADER_INPUT_4) ||
+           (cc->c[0][1] >= SHADER_INPUT_1 && cc->c[0][1] <= SHADER_INPUT_4) ||
+           (cc->c[0][2] >= SHADER_INPUT_1 && cc->c[0][2] <= SHADER_INPUT_4) ||
+           (cc->c[0][3] >= SHADER_INPUT_1 && cc->c[0][3] <= SHADER_INPUT_4);
+}
+
+/* RGB and alpha have independent input maps. An alpha-only second input
+ * must not replace the first RGB input (for example MODULATERGBFADEA). */
+static int cc_cycle_input(const struct CCFeatures *cc, int cycle) {
+    for (int k = 3; k >= 0; k--) {
+        int v = cc->c[cycle][k];
+        if (v >= SHADER_INPUT_1 && v <= SHADER_INPUT_4) return v - SHADER_INPUT_1;
+    }
+    return -1;
+}
+
+/* Binary-alpha interpolation between a texture and one shaded input. */
+static inline int cc_blend_texel_alpha(const struct CCFeatures *cc) {
+    return cc->c[0][0] == SHADER_TEXEL0 && cc->c[0][2] == SHADER_TEXEL0A &&
+           cc->c[0][1] == cc->c[0][3] &&
+           (cc->c[0][1] >= SHADER_INPUT_1 && cc->c[0][1] <= SHADER_INPUT_4);
+}
+
 static unsigned g_cd_fallbacks;      /* combiners that didn't fit texel*C+D */
 static int      g_cd_active;         /* set by gpu_draw_triangles for emit_tri_state */
 static int      g_subpix_tri;        /* 1 = 3D vert-tri sends Q12.4 subpixel Y (control bit 31) */
 
-#ifdef TARGET_OPENFPGA
-/* ---- Texture-fill eviction model (CPU-only decision instrumentation) --------
- * Q: would reordering the draw stream by texture cut GPU texture-cache misses
- * enough to justify a re-sort?  Models the os30 16 KB tex cache as a fully-
- * associative LRU over the real-texture (re)bind sequence the GPU actually sees.
- * FA-LRU over-counts hits vs the true direct-mapped cache, so the result is an
- * OPTIMISTIC ceiling on what any re-sort could recover.  Per frame:
- *   binds     = real-texture (re)binds (tex_addr changed; tiny white/ramp ignored)
- *   distinct  = first-touches = the COMPULSORY working set (paid regardless of order)
- *   removable = re-binds whose texture was EVICTED since last use (reuse-distance
- *               footprint > 16 KB): a current MISS that clustering turns into a hit
- *               = the refetch a re-sort can remove.  removable/binds = THE ceiling.
- *   resident  = re-binds still cache-hot (sorting wins nothing there)
- *   ws_kb     = sum of distinct footprints (confirm the 40-160 KB >> 16 KB picture)
- * Footprint = full w*h*bpp (a triangle may sample only part of a texture), so the
- * removable count is an UPPER bound.  Scope is per-frame: only intra-frame
- * reordering is in question (a re-sort can't cross the frame boundary). */
-#define EV_CACHE_BYTES 16384u
-#define EV_MRU_MAX     96    /* recent-tex window; >>16 KB of footprint -> resident set always inside it */
-#define EV_SEEN_MAX    512   /* distinct tex/frame (heavy ~99); matches the gfx_pc 512-entry pool */
-
-static uint32_t ev_mru_addr[EV_MRU_MAX], ev_mru_bytes[EV_MRU_MAX];
-static int      ev_mru_n;
-static uint32_t ev_seen[EV_SEEN_MAX];
-static int      ev_seen_n;
-static uint32_t ev_last_tex_addr = 0xFFFFFFFFu;
-static uint32_t ev_binds, ev_distinct, ev_resident, ev_removable, ev_ws_bytes, ev_seen_ovf;
-
-static void ev_note_bind(uint32_t addr, uint32_t bytes) {
-    int i, pos;
-    ev_binds++;
-
-    /* First touch this frame -> compulsory working-set fill (not removable). */
-    for (i = 0; i < ev_seen_n; i++)
-        if (ev_seen[i] == addr) break;
-    if (i == ev_seen_n) {
-        if (ev_seen_n < EV_SEEN_MAX) ev_seen[ev_seen_n++] = addr; else ev_seen_ovf++;
-        ev_distinct++;
-        ev_ws_bytes += bytes;
-    } else {
-        /* Re-bind: reuse distance = footprint of textures touched since its last
-         * bind.  > cache => it was evicted (clustering would have kept it). */
-        uint32_t dist = 0;
-        for (pos = 0; pos < ev_mru_n; pos++) {
-            if (ev_mru_addr[pos] == addr) break;
-            dist += ev_mru_bytes[pos];
-        }
-        if (pos == ev_mru_n || dist > EV_CACHE_BYTES) ev_removable++;
-        else                                          ev_resident++;
-    }
-
-    /* Move addr to MRU front (evict the LRU tail when the window is full). */
-    for (pos = 0; pos < ev_mru_n; pos++)
-        if (ev_mru_addr[pos] == addr) break;
-    if (pos == ev_mru_n) {
-        if (ev_mru_n < EV_MRU_MAX) ev_mru_n++;
-        pos = ev_mru_n - 1;
-    }
-    for (i = pos; i > 0; i--) {
-        ev_mru_addr[i]  = ev_mru_addr[i - 1];
-        ev_mru_bytes[i] = ev_mru_bytes[i - 1];
-    }
-    ev_mru_addr[0]  = addr;
-    ev_mru_bytes[0] = bytes;
-}
-#endif /* TARGET_OPENFPGA */
-
 /* Emit the sticky surface state for the current batch. */
 static void emit_tri_state(int textured) {
+    if (textured && g_cur_tex[0])
+        g_cur_tex[0]->slot_epoch[g_cur_tex[0]->cur] = g_tex_epoch;
+    if (g_st_cache_valid && !g_tri_state_dirty &&
+        g_st_textured == textured && g_st_cd == g_cd_active &&
+        g_st_subpix == g_subpix_tri && g_st_alpha == g_surf_alpha &&
+        g_st_alpha_mask == g_alpha_mask)
+        return;
+    g_st_textured = textured;
+    g_st_cd = g_cd_active;
+    g_st_subpix = g_subpix_tri;
+    g_st_alpha_mask = g_alpha_mask;
+    g_st_alpha = g_surf_alpha;
+    g_tri_state_dirty = 0;
     struct GTex *t = textured ? g_cur_tex[0] : NULL;
     of_gpu_tri_state_t st;
     memset(&st, 0, sizeof(st));
@@ -736,10 +893,24 @@ static void emit_tri_state(int textured) {
     st.fb_major_step = FB_STRIDE * g_fb_bpp;   /* bytes per scanline */
     st.fb_minor_step = g_fb_bpp;               /* bytes per pixel */
     int skip_zero = g_cur_shader && (g_cur_shader->cc.opt_alpha ||
-                                     g_cur_shader->cc.opt_texture_edge);
+                                     g_cur_shader->cc.opt_texture_edge ||
+                                     cc_blend_texel_alpha(&g_cur_shader->cc));
+    /* ALPHA_CVG_SEL: alpha acts as coverage, so a zero-alpha texel is never
+     * written on hardware.  None of the three tests above catch it -- the mode
+     * rides on OPAQUE surfaces, whose G_BL_A_MEM blender input makes gfx_pc
+     * strip the alpha cycle (opt_alpha false), and it is ALPHA_CVG_SEL (0x2000)
+     * rather than CVG_X_ALPHA (0x1000), so opt_texture_edge is false too.
+     * Without this the transparent background of such a texture gets written as
+     * the reserved key value, i.e. black: the intro's 128x16 copyright strip
+     * turned into a solid bar the frame its fade counter reached 255 and
+     * geo_fade_transition() swapped G_RM_AA_XLU_SURF for G_RM_AA_OPA_SURF.
+     * Truecolor only: tex565_texel nudges opaque black to 0x0001 so texel 0
+     * means transparent and nothing else, whereas RGB332 has no reserved key
+     * (rgb332(black) == 0) and widening the discard there would punch holes. */
+    if (g_truecolor && g_alpha_cvg) skip_zero = 1;
     if (g_truecolor) {
         if (textured && t && t->ci8) {
-            st.tex_addr  = t->addr;
+            st.tex_addr  = g_alpha_mask ? (uint32_t)(uintptr_t)t->alpha_mask[t->cur] : t->addr;
             st.tex_width = t->w;
             st.tex_w_mask = t->wmask;
             st.tex_h_mask = t->hmask;
@@ -813,15 +984,10 @@ static void emit_tri_state(int textured) {
      * sank the title Mario head and the Peach letter into the dark background.
      * XLU surfaces (water, lava, screen fades, Boos) conventionally disable
      * z-write, so gate on !g_z_write to separate them from opaque AA geometry. */
-    /* a==0 must NOT blend: opaque surfaces (e.g. the intro goddard Mario head,
-     * AA-no-z-write textured geometry) report opt_alpha but carry a spurious
-     * 0 surface alpha — blending them src*0+dst makes them fully TRANSPARENT, so
-     * they vanish and show the geometry behind = "wrong texture / missing head".
-     * Only blend genuinely-translucent surfaces (0 < a < 255); a==0 renders
-     * opaque (visible).  Real translucency (water/lava/fades/dialog box ~150)
-     * is unaffected. */
+    /* Zero is the transparent endpoint of the same fade. Treating it as
+     * opaque flashes overlays on the first and last frames of a fade. */
     if (g_truecolor && g_cur_shader && g_cur_shader->cc.opt_alpha
-        && g_surf_alpha > 0 && g_surf_alpha < 255 && !g_z_write) {
+        && g_surf_alpha < 255 && !g_z_write) {
         st.flags |= OF_GPU_SPAN_BLEND;
         st.const_alpha = g_surf_alpha;
     }
@@ -845,20 +1011,19 @@ static void emit_tri_state(int textured) {
     st.clip_y0 = g_clip_y0; st.clip_y1 = g_clip_y1;
 
     /* Skip redundant sticky-state commands (st is fully memset, so the
-     * padding is zero and the compare is well-defined). */
+     * padding is zero and the compare is well-defined).
+     * SINGLE SOURCE OF TRUTH: g_st_cache mirrors the last 0x4A image put on
+     * the wire, whichever path emitted it — the legacy batch path, tex_rect,
+     * AND the vertex-cache path all build their image here and memcmp against
+     * this one memo, so neither path can ever skip an emission while the
+     * GPU's sticky state belongs to the other (the two images always differ
+     * when their surface state differs). */
     if (g_st_cache_valid && memcmp(&st, &g_st_cache, sizeof(st)) == 0)
         return;
     g_st_cache = st;
     g_st_cache_valid = 1;
-#ifdef TARGET_OPENFPGA
-    /* Eviction-model hook: record the real-texture (re)bind sequence the GPU sees
-     * (a new 0x4A actually emits here; count only when the bound texture changed). */
-    if (textured && t && t->ci8 && st.tex_addr != ev_last_tex_addr) {
-        ev_note_bind(st.tex_addr, (uint32_t)t->w * (uint32_t)t->h * (uint32_t)g_fb_bpp);
-        ev_last_tex_addr = st.tex_addr;
-    }
-#endif
     of_gpu_set_tri_state(&st);
+    g_vc_words += 18;                  /* 0x4A: 1 header + 17 payload */
 }
 
 /* Per-triangle Q29 zi-precision override (0x4E word 15: {q29_en[5], shift[4:0]}).
@@ -878,6 +1043,18 @@ static inline uint32_t gpu_q29_word(const int32_t zi[3]) {
  * got to full over the window (0 = saturated).  The _gpu_dbg_* counters are
  * static-in-header, so only this TU (which does the ring writes) sees the live
  * values.  spins is the delta since the last call; min_free is reset here. */
+/* Per-frame present split, in PROF ticks; both counters reset on read.
+ * flip = CPU cost of submitting the flip; acq = idle blocked in
+ * of_video_acquire_next waiting for a free draw buffer. */
+void gpu_present_prof_get(unsigned *flip, unsigned *acq) {
+#if defined(TARGET_OPENFPGA) && !defined(OF_PC)
+    *flip = prof_flip_ticks; *acq = prof_acq_ticks;
+    prof_flip_ticks = prof_acq_ticks = 0;
+#else
+    *flip = 0; *acq = 0;
+#endif
+}
+
 void gpu_ring_prof_get(unsigned *spins, unsigned *min_free) {
 #ifdef OF_PC
     /* The _gpu_dbg_* ring counters live behind #ifndef OF_PC in of_gpu.h, so on
@@ -893,50 +1070,182 @@ void gpu_ring_prof_get(unsigned *spins, unsigned *min_free) {
 #endif
 }
 
-/* Read this frame's texture-eviction model (see ev_note_bind).  removable/binds
- * is the OPTIMISTIC ceiling on the tex-fetch reduction a draw-reorder could buy. */
-void gpu_evict_prof_get(unsigned *binds, unsigned *distinct, unsigned *removable,
-                        unsigned *resident, unsigned *ws_kb, unsigned *ovf) {
-    *binds = ev_binds; *distinct = ev_distinct;
-    *removable = ev_removable; *resident = ev_resident;
-    *ws_kb = ev_ws_bytes >> 10; *ovf = ev_seen_ovf;
-}
-
-/* Reset the model at the start of every frame (intra-frame reorder is the scope). */
-void gpu_evict_prof_reset(void) {
-    ev_mru_n = 0; ev_seen_n = 0; ev_last_tex_addr = 0xFFFFFFFFu;
-    ev_binds = ev_distinct = ev_resident = ev_removable = ev_ws_bytes = ev_seen_ovf = 0u;
-}
-
-/* Per-frame GPU SDRAM channel utilization (CHANUTIL): which traffic source held
- * the SDRAM bus -- texture line-fills (rd_tex) vs the framebuffer bucket (rd_z +
- * wr_z + wr_color) -- to settle whether heavy frames are texture-read-bound or
- * framebuffer-bound.  The HW counters are CUMULATIVE (free-running since GPU
- * reset), so keep a static prev and return per-frame deltas; the caller normalizes
- * each to the clk delta.  of_gpu_debug_snapshot(.,0): the 0 is REQUIRED -- a 1
- * would zero the ring/dma wait window that gpu_ring_prof_get already consumed.
- *
- * IMPORTANT: the shipped os30 bitstream does NOT yet implement these counters (the
- * gpu_core read mux returns 0 for the CHANUTIL VAL slot), so every field reads 0,
- * clk stays 0, and the caller prints "n/a".  This plumbing lights up automatically
- * once the GPU RTL adds source-keyed counters at matching register offsets. */
-void gpu_chan_prof_get(unsigned *clk, unsigned *busy, unsigned *wait,
-                       unsigned *rd_tex, unsigned *rd_z,
-                       unsigned *wr_z, unsigned *wr_color, unsigned *xfer) {
-    static of_gpu_debug_snapshot_t prev;
-    of_gpu_debug_snapshot_t now;
-    of_gpu_debug_snapshot(&now, 0);
-    *clk      = now.chan_clk      - prev.chan_clk;
-    *busy     = now.chan_busy_any - prev.chan_busy_any;
-    *wait     = now.chan_wait     - prev.chan_wait;
-    *rd_tex   = now.chan_rd_tex   - prev.chan_rd_tex;
-    *rd_z     = now.chan_rd_z     - prev.chan_rd_z;
-    *wr_z     = now.chan_wr_z     - prev.chan_wr_z;
-    *wr_color = now.chan_wr_color - prev.chan_wr_color;
-    *xfer     = now.chan_xfer     - prev.chan_xfer;
-    prev = now;
-}
 #endif
+
+/* ================================================================
+ * Vertex-cache fast path (0x56 LOAD_VERT_CLIP + 0x54 DRAW_INDEXED_TRI)
+ * ================================================================ */
+
+/* Per-frame wire counters, reset on read (same pattern as gpu_ring_prof_get). */
+void gpu_vc_prof_get(unsigned *words, unsigned *ctris, unsigned *ltris,
+                     unsigned *loads) {
+    *words = g_vc_words;       g_vc_words = 0;
+    *ctris = g_vc_tris_cached; g_vc_tris_cached = 0;
+    *ltris = g_vc_tris_legacy; g_vc_tris_legacy = 0;
+    *loads = g_vc_loads;       g_vc_loads = 0;
+}
+
+/* Per-batch eligibility for the cached path, memoized until any material
+ * state changes (g_vc_state_dirty).  Nonzero -> GFX_VC_* flags; 0 -> the
+ * caller must use the flattened 0x4E path.  Ineligible: no caps bit /
+ * kill switch (g_clip_load), palettized (g_truecolor), HILITE texel*C+D
+ * class (no rgb_d slot exists in the cache), decal (the per-vertex depth
+ * bias cannot ride a shared slot — GPU derives depth from w alone), and
+ * blend/XLU (opt_alpha with z-write off — see below). */
+int gfx_gpu_vtx_cache_begin(int *rgb_input, int *alpha_input) {
+    if (!g_clip_load || !g_truecolor || !g_cur_shader)
+        return 0;
+    if (!g_vc_state_dirty) {
+        *rgb_input = g_vc_rgb_input;
+        *alpha_input = g_vc_alpha_input;
+        return g_vc_elig;
+    }
+    const struct CCFeatures *cc = &g_cur_shader->cc;
+    const int textured = cc->used_textures[0] && g_cur_tex[0] && g_cur_tex[0]->ci8;
+    int cd_a, cd_b, cd_d;
+    const int cd_on = textured ? classify_combine_cd(cc, &cd_a, &cd_b, &cd_d) : 0;
+    /* Blend/XLU ineligible (hardware A/B: FRAMERATE fix, not correctness).
+     * SM64's XLU surfaces are largely decals (already ineligible), so a
+     * blend batch ping-pongs cached-immediate vs buffered-fallback tris,
+     * and EVERY alternation forces a gfx_flush + a fresh 18-word 0x4A —
+     * word amplification that showed up as the transparency fps drop.
+     * Gate on the same XLU convention emit_tri_state's blend uses
+     * (opt_alpha && !z_write), minus the per-vertex alpha test, so the
+     * verdict stays memoizable per material.  Opaque AA geometry
+     * (opt_alpha with z-write) stays cached and never blends.
+     * TODO(v2): an order-preserving cached-tri queue (defer 0x54s next to
+     * the buffered 0x4E stream and interleave at flush) would let XLU ride
+     * the cache without the flush ping-pong; v1 punts because transparency
+     * is a small fraction of SM64's tris and the queue complicates the
+     * exact painter's-order guarantee blending relies on. */
+    const int xlu = cc->opt_alpha && !g_z_write;
+
+    g_vc_state_dirty = 0;
+    g_vc_textured = textured;
+    g_vc_elig = 0;
+    g_vc_rgb_input = -1;
+    g_vc_alpha_input = -1;
+    if (!cd_on && !g_decal && !xlu && !cc_blend_texel_alpha(cc)) {
+        g_vc_rgb_input = cc_cycle_input(cc, 0);
+        if (cc->opt_alpha) g_vc_alpha_input = cc_cycle_input(cc, 1);
+        g_vc_elig = 1 | (textured ? GFX_VC_TEXTURED : 0);
+    }
+    *rgb_input = g_vc_rgb_input;
+    *alpha_input = g_vc_alpha_input;
+    return g_vc_elig;
+}
+
+/* Draw one triangle from the GPU vertex cache: lazily (re)emit the sticky
+ * 0x50 viewport + 0x4A surface state, upload the dirty slots (0x56), then
+ * the 1-word 0x54.  Caller (gfx_pc) guarantees eligibility, slots < 32,
+ * 0 < w < 32767, and that buffered 0x4E tris were flushed first. */
+void gfx_gpu_vtx_cache_tri(const struct gfx_vc_vtx v[3], const uint8_t slot[3],
+                           unsigned dirty_mask) {
+    /* The shared emitter checks material changes and dynamic draw fields
+     * before building state. Every path still passes through that one memo. */
+    g_cd_active = 0;      /* eligible => never the texel*C+D class */
+    g_subpix_tri = 1;     /* viewport Y constants are scaled to Q12.4 */
+    g_surf_alpha = v[0].a;
+    emit_tri_state(g_vc_textured);
+
+    /* X projection returns Q12.4. Scaling both Y viewport constants by 16
+     * gives matching subpixel precision without changing the command ABI. */
+    if (!g_vc_vp_valid || g_vc_vp[0] != g_cx || g_vc_vp[1] != g_cy ||
+        g_vc_vp[2] != g_hw || g_vc_vp[3] != g_hh) {
+        of_gpu_object_state_t os;
+        memset(&os, 0, sizeof(os));
+        os.xcenter   = (int32_t)lrintf(g_cx);
+        os.ycenter   = (int32_t)lrintf(g_cy * 16.0f);
+        os.xscale    = (int32_t)lrintf(g_hw);
+        os.yscale    = (int32_t)lrintf(g_hh * 16.0f);
+        os.near_clip = 256;
+        os.rows      = 3;
+        of_gpu_set_object_state(&os);
+        g_vc_words += 27;              /* 0x50: 1 header + 26 payload */
+        g_vc_vp[0] = g_cx; g_vc_vp[1] = g_cy;
+        g_vc_vp[2] = g_hw; g_vc_vp[3] = g_hh;
+        g_vc_vp_valid = 1;
+    }
+
+    /* w PRE-SCALE (hardware-verified fix for misplaced distant triangles):
+     * the GPU's reciprocal is INTEGER — zi = floor(2^32 / w_q16) — and its
+     * projection ratio is (x_q16 * zi) >> 16.  At SM64's far w (~20000) raw
+     * Q16.16 gives zi = 3, and the zi quantization (stepping 4 -> 3 across a
+     * triangle's vertices) shifts each projected vertex DIFFERENTLY: up to
+     * 12.19 px of per-vertex error, i.e. the "20% of triangles misplaced"
+     * A/B artifact.  Scaling cx, cy, cw ALL by 1/256 before the Q16.16
+     * conversion leaves x/w (the projection) mathematically unchanged but
+     * moves zi into 838..168k over SM64's w range (100..22000) — monotonic,
+     * so z-ordering is preserved, and the worst projection error drops to
+     * 0.19 px (RTL-exact integer math, verified).  Since FIX E, the z-buffer
+     * depth is an explicit slot word (below) — the prescale only shapes the
+     * projection and the perspective-interpolation zi. */
+    for (int k = 0; k < 3; k++) {
+        if (!(dirty_mask & (1u << k)))
+            continue;
+        const uint16_t rgb = (g_vc_rgb_input < 0)
+                           ? 0xFFFF : rgba_to_565(v[k].r, v[k].g, v[k].b);
+        /* FIX E (explicit depth, hardware round 3): the GPU-derived slot depth
+         * (= zi) flattened far-field z resolution ~64x vs the legacy 2^30
+         * scale — the "surfaces pop in/out" regression.  The 0x56 contract now
+         * carries an app-computed depth word: (1/w)*2^30 from the TRUE
+         * LoadedVertex w, with the SAME clamps + lrintf as the legacy 0x4E
+         * loop, so cached and fallback tris z-compare at full legacy
+         * precision in the shared z-buffer.  The VC_W_PRESCALE on cx/cy/cw
+         * below now affects position + zi (perspective interpolation) ONLY —
+         * depth no longer depends on it. */
+        float df = v[k].w_inv * 1073741824.0f;   /* 1/w * 2^30 */
+        if (df < 1.0f) df = 1.0f;
+        else if (df > 2147483520.0f) df = 2147483520.0f;
+        of_gpu_load_vert_clip(slot[k],
+                              (int32_t)lrintf(v[k].cx * (65536.0f * VC_W_PRESCALE)),
+                              (int32_t)lrintf(v[k].cy * (65536.0f * VC_W_PRESCALE)),
+                              (int32_t)lrintf(v[k].cw * (65536.0f * VC_W_PRESCALE)),
+                              (int32_t)lrintf(v[k].u * 65536.0f),
+                              (int32_t)lrintf(v[k].v * 65536.0f),
+                              rgb,
+                              (uint32_t)lrintf(df));
+        g_vc_words += 9;                   /* 0x56: 1 header + 8 payload */
+        g_vc_loads++;
+    }
+
+    of_gpu_draw_indexed_tri(slot[0], slot[1], slot[2]);
+    g_vc_words += 2;                       /* 0x54: 1 header + 1 payload */
+    g_vc_tris_cached++;
+
+    /* Keep the GPU fed on long cached-only runs (the legacy path kicks once
+     * per material batch; match that cadence without a per-tri doorbell). */
+    if (++g_vc_kick >= 32u) {
+        g_vc_kick = 0;
+        of_gpu_kick();
+    }
+}
+
+/* Match the GPU's quantization, reciprocal and signed shifts on both axes.
+ * Do not reconstruct clip coordinates from NDC: that round trip can change a
+ * shared vertex at a rounding boundary. */
+/* The denominator is clamped to at least 256. Compute floor(2^32 / den)
+ * with one RV32 division, correcting the UINT32_MAX numerator exactly. */
+static inline uint32_t gpu_clip_reciprocal(uint32_t den) {
+    uint32_t q = UINT32_MAX / den;
+    return q + (UINT32_MAX - q * den == den - 1u);
+}
+
+static void gpu_project_clip(float cx, float cy, float cw, int16_t *x, int16_t *y) {
+    int32_t xq = (int32_t)lrintf(cx * (65536.0f * VC_W_PRESCALE));
+    int32_t yq = (int32_t)lrintf(cy * (65536.0f * VC_W_PRESCALE));
+    int32_t wq = (int32_t)lrintf(cw * (65536.0f * VC_W_PRESCALE));
+    uint32_t den = wq < 256 ? 256u : (uint32_t)wq;
+    uint32_t recip = gpu_clip_reciprocal(den);
+    int32_t rx = (int32_t)(((int64_t)xq * recip) >> 16);
+    int32_t ry = (int32_t)(((int64_t)yq * recip) >> 16);
+    int64_t sx = (int32_t)lrintf(g_cx) * 16LL
+               + (((int64_t)(int32_t)lrintf(g_hw) * rx) >> 12);
+    int64_t sy = (int32_t)lrintf(g_cy * 16.0f)
+               - (((int64_t)(int32_t)lrintf(g_hh * 16.0f) * ry) >> 16);
+    *x = sx < -32768 ? -32768 : sx > 32767 ? 32767 : (int16_t)sx;
+    *y = sy < -32768 ? -32768 : sy > 32767 ? 32767 : (int16_t)sy;
+}
 
 static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
                                size_t buf_vbo_num_tris) {
@@ -956,9 +1265,9 @@ static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
     const float tw_q = 65536.0f;
     const float th_q = 65536.0f;
     const int coff = sh->coff;
-    /* When a combiner has 2 colour inputs, the 2nd is the shade (the 1st is the
-     * specular PRIM); pick it so e.g. the Mario head isn't black. */
-    const int csel = (sh->cc.num_inputs > 1) ? (sh->cc.opt_alpha ? 4 : 3) : 0;
+    const int rgb_input = cc_cycle_input(&sh->cc, 0);
+    const int alpha_input = cc_cycle_input(&sh->cc, 1);
+    const int csel = (rgb_input < 0 ? 0 : rgb_input) * (sh->cc.opt_alpha ? 4 : 3);
     /* Does the RGB colour cycle actually consume a per-vertex colour input?  A
      * pure decal (e.g. G_CC_DECALFADEA on the intro Peach letter: RGB cycle =
      * (0,0,0,TEXEL0)) carries its only input (ENV) in the ALPHA cycle, so
@@ -966,80 +1275,77 @@ static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
      * colour-slot 0 is filled BLACK, so the texel would be modulated by 0x0000
      * and the tan parchment renders dark.  Detect a texel-only RGB cycle and
      * modulate by white (0xFFFF) instead of that black slot. */
-    const int rgb_has_input =
-        (sh->cc.c[0][0] >= SHADER_INPUT_1 && sh->cc.c[0][0] <= SHADER_INPUT_4) ||
-        (sh->cc.c[0][1] >= SHADER_INPUT_1 && sh->cc.c[0][1] <= SHADER_INPUT_4) ||
-        (sh->cc.c[0][2] >= SHADER_INPUT_1 && sh->cc.c[0][2] <= SHADER_INPUT_4) ||
-        (sh->cc.c[0][3] >= SHADER_INPUT_1 && sh->cc.c[0][3] <= SHADER_INPUT_4);
-    /* BLEND-by-texel-alpha decal form (G_CC_BLENDRGBFADEA/BLENDRGBA — Mario's cap
-     * M-logo, eyes, mustache, hair, button): RGB = (TEXEL0 - SHADE)*TEXEL0_ALPHA +
-     * SHADE, a per-pixel lerp from SHADE to the texel by the texel's alpha.
-     * classify_combine_cd doesn't match it (its multiplier is TEXEL0_ALPHA, not
-     * TEXEL0), so it fell to plain texel*SHADE — dropping the subtract + additive
-     * base and darkening/hue-shifting the opaque emblem ("inverted").  texelA is
-     * per-pixel (the per-vertex C/D resolver can't carry it), but these decals are
-     * binary-alpha: the transparent side is already SKIP_ZERO-dropped (the cap shows
-     * through), and at the opaque glyph texelA~1 so the N64 output is EXACTLY TEXEL0
-     * ((texel-shade)*1+shade = texel).  So modulate the texel by white, not SHADE. */
-    const int blend_texel_alpha =
-        sh->cc.c[0][2] == SHADER_TEXEL0A &&
-        (sh->cc.c[0][1] >= SHADER_INPUT_1 && sh->cc.c[0][1] <= SHADER_INPUT_4);
+    const int rgb_has_input = cc_rgb_has_input(&sh->cc);
+    /* Binary-alpha decals need a shaded complementary pass. */
+    const int blend_texel_alpha = cc_blend_texel_alpha(&sh->cc);
+    const int shade_mask = g_truecolor && textured && blend_texel_alpha
+                        && (!sh->cc.opt_alpha || (sh->cc.do_single[1] && alpha_input >= 0))
+                        && gpu_tex_alpha_mask(g_cur_tex[0]);
 
     /* Full combiner emulation: detect the HILITE class (texel*C+D) so the GPU
      * resolves the specular highlight (e.g. the title Mario head) instead of the
      * legacy single-input texel*C.  Only on truecolor + textured surfaces. */
     const int istride = sh->cc.opt_alpha ? 4 : 3;
     int cd_a = -1, cd_b = -1, cd_d = -1;
-    /* Combiner (texel*C+D, the HILITE/Goddard Mario head) is used UNCONDITIONALLY
-     * on truecolor: os30 always builds the combiner (it is no longer a gate — the
-     * EXCLUDE_COMBINE experiment was reverted), so the caps-check (g_combine /
-     * OF_HW_GPU_COMBINE) is vestigial and was the single failure point that left
-     * the head dark.  classify_combine_cd still only engages the HILITE class.
-     * (g_combine stays computed for diagnostics / a future caps-gated build.) */
-    int cd_on = (g_truecolor && textured)
+    int cd_on = (g_truecolor && g_combine && textured)
                 ? classify_combine_cd(&sh->cc, &cd_a, &cd_b, &cd_d) : 0;
-    (void)g_combine;
     if (g_truecolor && textured && !cd_on) g_cd_fallbacks++;
     g_cd_active = cd_on;
     g_subpix_tri = g_truecolor;   /* 3D vert-tri: Q12.4 subpixel Y (truecolor only) */
+    /* (No g_vc_state_dirty here: 0x4A emission coherence is owned by the
+     * shared g_st_cache memo since the round-4 restructure, and a legacy
+     * draw changes no eligibility ingredient.) */
 
-    /* Per-surface src alpha for blending (Stage 0: constant).  When the
-     * combiner blends (opt_alpha), each colour input carries a 4th alpha float
-     * (premultiplied by 1/w like the colour); take vertex 0's as the surface
-     * constant — water/lava/fades/Boos use a uniform alpha across the surface. */
-    g_surf_alpha = 255;
-    if (sh->cc.opt_alpha && has_color) {
-        const float *f0 = buf_vbo;
-        float w0 = (f0[3] != 0.0f) ? 1.0f / f0[3] : 0.0f;
-        int a = (int)lrintf(f0[coff + csel + 3] * w0);
-        if (a < 0) a = 0; else if (a > 255) a = 255;
-        g_surf_alpha = (uint8_t)a;
-    }
+    /* Keep cached and fallback edges identical, including across materials. */
+    const int vc_live = g_clip_load && g_truecolor;
 
-    emit_tri_state(textured);
-
-    /* buf_vbo holds premultiplied NDC (GFX_W_PREMULT on): f[0],f[1]=NDC x,y;
-     * f[3]=1/w; f[4],f[5]=u/w,v/w; colours premultiplied by 1/w.  Project to
-     * screen, recover the perspective divide, and emit screen-space 0x4E/0x4B. */
+    /* buf_vbo layout on TARGET_OPENFPGA: f[0],f[1]=NDC x,y (these DO carry the
+     * 1/w divide); f[3]=1/w; f[4],f[5]=RAW texels u,v; colours RAW 0..255.
+     * Attributes are no longer premultiplied by 1/w — gfx_pc.c's GFX_OUT_PROP is
+     * identity here, because the only thing that ever wanted premultiplied
+     * attributes was the (unbuilt) software rasterizer, and this loop used to
+     * spend an fdiv.s per vertex undoing it.  Project to screen and emit
+     * screen-space 0x4E/0x4B. */
     for (size_t tri = 0; tri < buf_vbo_num_tris; tri++) {
         int16_t x[3], y[3];
         int32_t s[3], t[3], zi[3];
         uint8_t light[3];
         uint16_t rgb[3];
+        uint16_t shade_rgb[3];
         uint16_t rgb_d[3];      /* combine: per-vertex additive D (RGB565) */
         int32_t depth[3];
+
+        /* A batch can contain several material alpha values without a
+         * shader or texture change. Select the first vertex of THIS
+         * triangle; sharing the batch's first alpha flashes fading overlays. */
+        g_surf_alpha = 255;
+        if (sh->cc.opt_alpha && alpha_input >= 0) {
+            const float *f0 = buf_vbo + tri * 3 * stride;
+            int a = (int)lrintf(f0[coff + alpha_input * 4 + 3]);
+            if (a < 0) a = 0; else if (a > 255) a = 255;
+            g_surf_alpha = (uint8_t)a;
+        }
+        emit_tri_state(textured);
+
+        /* Consume the original coordinates saved before flattening. */
+        const struct gfx_vc_true_xyw *tv = NULL;
+        if (vc_live && gfx_vc_true[tri].valid) {
+            tv = &gfx_vc_true[tri];
+            gfx_vc_true[tri].valid = 0;
+        }
 
         /* Per-triangle perspective scale (see ZI_SCALE / ZI_DERIVE_TARGET).
          * The derived planes are szi=(u/w)*K, tzi=(v/w)*K, zi=(1/w)*K, so the
          * largest of |1/w|,|u/w|,|v/w| over the 3 verts bounds all three.  Pick
          * K so the peak lands at ZI_DERIVE_TARGET — maximising the significant
          * gradient bits the HW derive retains, without overflowing the Q16.16
-         * window.  u/w,v/w are the premultiplied f[4],f[5]; 1/w is f[3].  Scale
+         * window.  1/w is f[3]; u/w and v/w are formed as f[4]*f[3], f[5]*f[3]
+         * (f[4],f[5] are raw texels now — see the layout note above).  Scale
          * cancels in szi/zi, so each triangle may use its own K and the shared
          * edge stays consistent.
          *
          * ONLY the textured path: there s carries the raw texel u, so szi=(u/w)*K
-         * really is bounded by f[4].  The untextured palettized path instead packs
+         * really is bounded by f[4]*f[3].  The untextured palettized path instead packs
          * the colour index (0..255) into s, so szi=index*(1/w)*K — a large K would
          * overflow it; that (precision-insensitive) ramp path keeps the fixed
          * ZI_SCALE.  Truecolor-untextured sends s=t=0 (no texcoord to sharpen). */
@@ -1048,9 +1354,14 @@ static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
             float m = 0.0f;
             for (int k = 0; k < 3; k++) {
                 const float *f = buf_vbo + (tri * 3 + k) * stride;
+                /* f[4]/f[5] are now RAW texels u,v (gfx_pc no longer premultiplies
+                 * by 1/w on this target), but the bound we need is on the DERIVED
+                 * plane values szi=u/w and tzi=v/w — so form them here with one
+                 * multiply each.  Two fmul.s replacing an fdiv.s plus the whole
+                 * de-premultiply chain below is a large net win. */
                 float a3 = fabsf(f[3]);            /* |1/w| (bounds zi)        */
-                float a4 = fabsf(f[4]);            /* |u/w| (bounds szi)       */
-                float a5 = fabsf(f[5]);            /* |v/w| (bounds tzi)       */
+                float a4 = fabsf(f[4] * f[3]);     /* |u/w| (bounds szi)       */
+                float a5 = fabsf(f[5] * f[3]);     /* |v/w| (bounds tzi)       */
                 if (a3 > m) m = a3;
                 if (a4 > m) m = a4;
                 if (a5 > m) m = a5;
@@ -1062,12 +1373,16 @@ static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
         for (int k = 0; k < 3; k++) {
             const float *f = buf_vbo + (tri * 3 + k) * stride;
             float wi = f[3];                       /* 1/w */
-            float w  = (wi != 0.0f) ? 1.0f / wi : 0.0f;
+            /* The `w = 1.0f/wi` that used to live here (one non-pipelined
+             * fdiv.s per VERTEX) is gone: gfx_pc.c hands us raw, un-premultiplied
+             * texcoords and colours on this target, so there is nothing to undo. */
 
             float sx = f[0] * g_hw + g_cx;
             float sy = g_cy - f[1] * g_hh;          /* flip NDC y-up -> screen y-down */
             x[k] = (int16_t)lrintf(sx * 16.0f);
-            if (g_truecolor) {
+            if (vc_live && tv) {
+                gpu_project_clip(tv->x[k], tv->y[k], tv->w[k], &x[k], &y[k]);
+            } else if (g_truecolor) {
                 /* Q12.4 subpixel Y (control bit 31) — 1/16-scanline edge
                  * precision so triangle vertices aren't snapped to whole
                  * scanlines (fixes the slightly-displaced character polygons).
@@ -1085,7 +1400,9 @@ static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
 
             /* Decoupled high-precision depth (0x4E w16-18): 1/w at a large fixed
              * scale, GPU float-compresses it for the z-buffer (independent of the
-             * perspective-capped zi above) -> ~10x better far-depth precision. */
+             * perspective-capped zi above) -> ~10x better far-depth precision.
+             * The cached path sends the SAME (1/w)*2^30 value in its 0x56 slot
+             * word (FIX E), so both populations z-compare consistently. */
             float df = wi * 1073741824.0f;      /* 1/w * 2^30 */
             /* Decal (G_ZMODE_DEC: shadows, signs, painting frames) sits on a
              * coplanar surface — bias it toward the camera (larger 1/w = nearer)
@@ -1098,14 +1415,14 @@ static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
 
             float cr = 255.0f, cg = 255.0f, cb = 255.0f;
             if (has_color) {
-                cr = f[coff + csel + 0] * w;
-                cg = f[coff + csel + 1] * w;
-                cb = f[coff + csel + 2] * w;
+                cr = f[coff + csel + 0];
+                cg = f[coff + csel + 1];
+                cb = f[coff + csel + 2];
             }
 
             if (textured) {
-                s[k] = (int32_t)lrintf((f[4] * w) * tw_q);  /* raw texel s, Q16.16 */
-                t[k] = (int32_t)lrintf((f[5] * w) * th_q);
+                s[k] = (int32_t)lrintf(f[4] * tw_q);       /* raw texel s, Q16.16 */
+                t[k] = (int32_t)lrintf(f[5] * th_q);
             } else if (g_truecolor) {
                 s[k] = 0;
                 t[k] = 0;
@@ -1114,14 +1431,15 @@ static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
                 t[k] = 0;
             }
 
+            shade_rgb[k] = rgba_to_565((int)cr, (int)cg, (int)cb);
             if (g_truecolor) {
                 if (cd_on) {
                     /* texel*C+D: C = val(a)-val(b) (signed), D = val(d).  Encode
                      * C into the signed RGB565 words; D into the rgb_d triple. */
                     float va[3], vb[3], vd[3];
-                    cc_val_rgb(f, coff, istride, cd_a, w, va);
-                    cc_val_rgb(f, coff, istride, cd_b, w, vb);
-                    cc_val_rgb(f, coff, istride, cd_d, w, vd);
+                    cc_val_rgb(f, coff, istride, cd_a, va);
+                    cc_val_rgb(f, coff, istride, cd_b, vb);
+                    cc_val_rgb(f, coff, istride, cd_d, vd);
                     rgb[k]   = ((uint16_t)enc_C5(va[0] - vb[0]) << 11)
                              | ((uint16_t)enc_C6(va[1] - vb[1]) << 5)
                              |  (uint16_t)enc_C5(va[2] - vb[2]);
@@ -1151,6 +1469,7 @@ static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
             float p2x = x[2] * (1.0f / 16.0f);
             float e1x = p1x - p0x, e1y = (float)(y[1] - y[0]), e1z = (float)(depth[1] - depth[0]);
             float e2x = p2x - p0x, e2y = (float)(y[2] - y[0]), e2z = (float)(depth[2] - depth[0]);
+            if (g_subpix_tri) { e1y *= 1.0f / 16.0f; e2y *= 1.0f / 16.0f; }
             float area = e1x * e2y - e2x * e1y;
             if (fabsf(area) > 0.5f) {              /* skip degenerate/edge-on tris */
                 float inv  = 1.0f / area;
@@ -1168,12 +1487,25 @@ static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
             }
         }
 
-        if (g_truecolor)
+        if (g_truecolor) {
+            if (shade_mask) {
+                g_alpha_mask = 1;
+                emit_tri_state(textured);
+                of_gpu_draw_vert_tri_rgb(x, y, s, t, zi, shade_rgb,
+                                         gpu_q29_word(zi), depth, NULL);
+                g_vc_words += 18u;
+                g_alpha_mask = 0;
+                emit_tri_state(textured);
+            }
             of_gpu_draw_vert_tri_rgb(x, y, s, t, zi, rgb, gpu_q29_word(zi), depth,
                                      cd_on ? rgb_d : NULL);
-        else
+            g_vc_words += cd_on ? 20u : 18u;
+        } else {
             of_gpu_draw_vert_tri(x, y, s, t, zi, light);
+            g_vc_words += 15u;
+        }
     }
+    g_vc_tris_legacy += (uint32_t)buf_vbo_num_tris;
     /* Publish this batch so the GPU rasterizes it while the CPU builds the next. */
     of_gpu_kick();
 }
@@ -1189,15 +1521,39 @@ static void gpu_fill_rect(int x0, int y0, int x1, int y1, const uint8_t *rgba) {
     if (x1 > SCR_W) x1 = SCR_W;
     if (y1 > SCR_H) y1 = SCR_H;
     if (x1 <= x0 || y1 <= y0) return;
-    /* clear_rect replicates one byte, so truecolor can only fill a
-     * byte-uniform RGB565 — use black (covers SM64's letterbox/border fills;
-     * rare coloured fills degrade to black). */
-    uint8_t c = g_truecolor ? 0 : rgb332(rgba[0], rgba[1], rgba[2]);
-    uint32_t addr = g_draw_fb +
-                    ((uint32_t)y0 * FB_STRIDE + (uint32_t)x0) * (uint32_t)g_fb_bpp;
-    of_gpu_clear_rect_strided(addr, (uint16_t)((x1 - x0) * g_fb_bpp),
-                              (uint16_t)(y1 - y0),
-                              (uint16_t)(FB_STRIDE * g_fb_bpp), c);
+    uint16_t color = rgba_to_565(rgba[0], rgba[1], rgba[2]);
+    if (g_truecolor && (uint8_t)color != (uint8_t)(color >> 8)) {
+        /* The clear command repeats a byte. Other RGB565 colors use two
+         * opaque, depth-independent triangles with a constant shade. */
+        of_gpu_tri_state_t st;
+        memset(&st, 0, sizeof(st));
+        st.fb_base = g_draw_fb;
+        st.fb_major_step = FB_STRIDE * 2;
+        st.fb_minor_step = 2;
+        st.tex_addr = g_white_addr;
+        st.tex_width = 1;
+        st.flags = OF_GPU_SPAN_TRUECOLOR;
+        st.clip_x1 = SCR_W; st.clip_y1 = SCR_H;
+        of_gpu_set_tri_state(&st);
+        const int16_t xy[4][2] = {{x0*16,y0},{x1*16,y0},{x1*16,y1},{x0*16,y1}};
+        const unsigned idx[2][3] = {{0,1,2},{0,2,3}};
+        const int32_t zero[3] = {0,0,0}, zi[3] = {65536,65536,65536};
+        const uint16_t rgb[3] = {color,color,color};
+        for (int t = 0; t < 2; t++) {
+            int16_t x[3], y[3];
+            for (int k = 0; k < 3; k++) { x[k]=xy[idx[t][k]][0]; y[k]=xy[idx[t][k]][1]; }
+            of_gpu_draw_vert_tri_rgb(x,y,zero,zero,zi,rgb,0,zero,NULL);
+        }
+        g_st_cache_valid = 0;
+    } else {
+        /* Preserve the fast clear for byte-uniform colors, including white. */
+        uint8_t c = g_truecolor ? (uint8_t)color : rgb332(rgba[0], rgba[1], rgba[2]);
+        uint32_t addr = g_draw_fb +
+                        ((uint32_t)y0 * FB_STRIDE + (uint32_t)x0) * (uint32_t)g_fb_bpp;
+        of_gpu_clear_rect_strided(addr, (uint16_t)((x1 - x0) * g_fb_bpp),
+                                  (uint16_t)(y1 - y0),
+                                  (uint16_t)(FB_STRIDE * g_fb_bpp), c);
+    }
 }
 
 static void gpu_tex_rect(int x0, int y0, int x1, int y1, float u0, float v0,
@@ -1218,7 +1574,7 @@ static void gpu_tex_rect(int x0, int y0, int x1, int y1, float u0, float v0,
 
     g_cd_active = 0;   /* 2D blit: never the texel*C+D combine path */
     g_subpix_tri = 0;  /* 2D rects: integer pixel-aligned Y, not Q12.4 */
-    emit_tri_state(1);
+    emit_tri_state(1); /* shared g_st_cache memo owns emission coherence */
 
     /* corner texel coords (texel units, like gfx_soft tex_rect) */
     float uL = u0,                  uR = u0 + dudx * (x1 - x0);
@@ -1244,10 +1600,14 @@ static void gpu_tex_rect(int x0, int y0, int x1, int y1, float u0, float v0,
             tl[k] = row; trgb[k] = vc;
             tdepth[k] = 0x40000000;   /* constant near depth (2D overlay) */
         }
-        if (g_truecolor)
+        if (g_truecolor) {
             of_gpu_draw_vert_tri_rgb(tx, ty, ts, tt, tzi, trgb, 0u, tdepth, NULL);
-        else
+            g_vc_words += 18u;
+        } else {
             of_gpu_draw_vert_tri(tx, ty, ts, tt, tzi, tl);
+            g_vc_words += 15u;
+        }
+        g_vc_tris_legacy++;
     }
 }
 
@@ -1258,18 +1618,97 @@ static void gpu_tex_rect(int x0, int y0, int x1, int y1, float u0, float v0,
 static void gpu_init(void)        { /* boot happens in gfx_gpu_boot via the WM */ }
 static void gpu_on_resize(void)   { }
 
+/* The kernel's acquire waits only ~5 ms for the flip fence, then queues the
+ * buffer itself: a slow GPU would present an unfinished frame, and a MiSTer
+ * system menu that pauses a queued CMD_FLIP would let rendering fill the
+ * command ring and trap.  Wait for the fence first.  The watchdog counts
+ * active vblanks, so a paused menu never trips it. */
+static void gpu_wait_flip_fence(uint32_t token) {
+    uint32_t last, active = 0, spins = 0;
+
+    if (of_gpu_fence_reached(token))
+        return;
+    last = of_video_vblank_count();
+    while (!of_gpu_fence_reached(token)) {
+        if (++spins < 4096u)
+            continue;
+        spins = 0;
+        uint32_t now = of_video_vblank_count();
+        active += now - last;
+        last = now;
+        if (active >= 300u)
+            __builtin_trap();   /* wedged GPU: trap so its state is dumped */
+    }
+}
+
 static void gpu_start_frame(void) {
     if (!g_has_gpu) return;
-    g_st_cache_valid = 0;   /* draw buffer rotated; force a fresh tri-state */
-    of_gpu_clear_rect_strided(g_draw_fb, (uint16_t)(SCR_W * g_fb_bpp), SCR_H,
-                              (uint16_t)(FB_STRIDE * g_fb_bpp), 0);
+    /* Deferred flip-acquire.  gfx_gpu_present() submits the flip and returns
+     * WITHOUT waiting; the wait for the next free draw buffer happens here, at
+     * the top of the following frame.  Everything the CPU does in between --
+     * the audio pump, the 30 Hz pacing, and the whole of the next frame's game
+     * logic -- now overlaps that wait instead of running after it.
+     *
+     * Safe because nothing between the flip and this point draws: g_draw_fb
+     * still names the just-flipped buffer, and the only writers of it
+     * (emit_tri_state / the clears below / fill_rect / tex_rect) are reachable
+     * solely from gfx_run_dl, which starts after this function.  A dropped
+     * frame returns from gfx_run before both this and the present, so the
+     * pending flag simply carries to the next rendered frame. */
+    if (g_flip_pending) {
+        PROF_ACQ_BEGIN();
+        gpu_wait_flip_fence(g_flip_token);
+        g_draw_idx = of_video_acquire_next(g_draw_idx, g_flip_token);
+        PROF_ACQ_END();
+        g_draw_fb = (uint32_t)(uintptr_t)of_video_buffer_addr(g_draw_idx);
+        g_flip_pending = 0;
+        if (!g_fb_active) {
+            g_fb_active = 1;
+            of_video_set_display_mode(OF_DISPLAY_FRAMEBUFFER);
+        }
+    }
+    if (++g_tex_epoch == 0) {
+        g_tex_epoch = 1;
+        for (uint32_t i = 0; i < g_tex_count; i++)
+            g_tex[i].slot_epoch[0] = g_tex[i].slot_epoch[1] = 0;
+    }
+    g_st_cache_valid = 0;   /* draw buffer rotated; force a fresh tri-state
+                             * (shared memo: covers BOTH 0x4A emit paths) */
+    gpu_material_changed();   /* refresh the eligibility memo */
+    g_vc_vp_valid = 0;      /* fresh sticky 0x50 each frame */
+    g_vc_kick = 0;
+    /* Colour clear only the first time each draw buffer is used.  SM64 covers
+     * every pixel itself, as on the N64 (which never cleared the colour
+     * buffer): skybox or full-screen background fill, screen borders, and
+     * clear_viewport()/clear_frame_buffer() whenever no area renders.  The
+     * per-frame clear cost the GPU-bound scenes 4-7% (Pocket os30 model:
+     * castle 22.5 -> 23.7 FPS, Bowser 18.9 -> 20.2; every compared frame
+     * byte-identical).  Build with -DGFX_GPU_CLEAR_COLOR=1 to restore it. */
+#ifndef GFX_GPU_CLEAR_COLOR
+#define GFX_GPU_CLEAR_COLOR 0
+#endif
+    static uint8_t cleared_bufs;
+    if (GFX_GPU_CLEAR_COLOR || !(cleared_bufs & (1u << (g_draw_idx & 7)))) {
+        cleared_bufs |= (uint8_t)(1u << (g_draw_idx & 7));
+        of_gpu_clear_rect_strided(g_draw_fb, (uint16_t)(SCR_W * g_fb_bpp), SCR_H,
+                                  (uint16_t)(FB_STRIDE * g_fb_bpp), 0);
+    }
     of_gpu_clear_rect_strided((uint32_t)(uintptr_t)g_zbuf,
                               SCR_W * ZBUF_ELEM, SCR_H, SCR_W * ZBUF_ELEM, 0);
+    /* Let the GPU clear both surfaces while the CPU processes vertices. */
+    of_gpu_kick_now();
 }
 
 static void gpu_end_frame(void)    { if (g_has_gpu) of_gpu_kick(); }
 static void gpu_finish_render(void) { }
-static void gpu_shutdown(void)      { if (g_has_gpu) of_gpu_shutdown(); }
+static void gpu_shutdown(void) {
+    if (g_has_gpu) of_gpu_shutdown();
+    while (g_extra_shaders) {
+        struct ShaderProgram *next = g_extra_shaders->next;
+        free(g_extra_shaders);
+        g_extra_shaders = next;
+    }
+}
 
 struct GfxRenderingAPI gfx_gpu_api = {
     gpu_z_is_from_0_to_1,
@@ -1307,4 +1746,6 @@ struct GfxRenderingAPI gfx_gpu_api = {
     NULL,
     gpu_set_fog_color,
     gpu_shutdown,
+    gpu_upload_texture_rgba16,   /* RGBA16 direct upload (skips the RGBA8888 hop) */
+    gpu_set_alpha_cvg_sel,       /* alpha-as-coverage: keep discarding texel 0 */
 };

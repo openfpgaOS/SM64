@@ -1,0 +1,48 @@
+LicenseRef-MicrosoftDirectX-Unclear
+===================================
+
+THIS IS NOT A LICENSE. It is a statement of what could and could not be
+verified about the Microsoft-authored Direct3D 12 headers vendored under
+src/sm64/sm64/src/pc/gfx/dxsdk/.
+
+What this identifier marks
+--------------------------
+
+  * src/pc/gfx/dxsdk/d3d12.h
+  * src/pc/gfx/dxsdk/d3d12sdklayers.h
+  * src/pc/gfx/dxsdk/d3dcommon.h
+
+These are MIDL-compiler-generated Direct3D 12 interface headers from the
+Windows SDK. They are used only by the upstream port's Windows Direct3D 12
+backend (src/pc/gfx/gfx_direct3d12.cpp), which this project does not build.
+
+Evidence of provenance (verified in-tree, not assumed)
+------------------------------------------------------
+
+  d3d12.h:3            " * Copyright (c) Microsoft Corporation"
+  d3d12sdklayers.h:3   " * Copyright (c) Microsoft Corporation"
+  d3dcommon.h          MIDL-generated; carries no copyright line at all.
+
+All three carry the MIDL banner "File created by MIDL compiler version
+8.01.0622" and "this ALWAYS GENERATED file contains the definitions for the
+interfaces".
+
+Copyright status
+----------------
+
+Copyright (c) Microsoft Corporation. These files are NOT the work of Emill
+and MaikelChan, whose LICENSE.txt governs the rest of src/pc/gfx/, and they
+are NOT the work of this project. No license text for them is vendored in
+this repository, and no in-tree evidence establishes which Windows SDK or
+DirectX licence terms the upstream port copied them under. The governing
+terms are therefore UNRESOLVED here.
+
+Note that the sibling file src/pc/gfx/dxsdk/d3dx12.h is different: it states
+its own terms in-tree ("Copyright (c) Microsoft. All rights reserved. This
+code is licensed under the MIT License (MIT).") and is annotated as MIT in
+REUSE.toml rather than with this identifier.
+
+For the files this identifier is applied to, this project makes no license
+claim and asserts no license grant. Anyone redistributing them should
+establish their provenance independently, or omit them (they are not needed
+to build this project).

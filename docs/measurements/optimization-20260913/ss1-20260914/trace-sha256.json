@@ -1,0 +1,42 @@
+{
+  "baseline-100-a": {
+    "slot_6.bin": "be0080bcc632df32de9951f7352f2831f8d5e7952232a3ea58eedee268ba21fa",
+    "slot_7.bin": "7d14105f309dceec187de3415c65563bd2e2d61aa9f93b1803724bfd85e70576",
+    "slot_8.bin": "a05b425057602c33449640fb19cd1cd59edbca84670252a4cb541e8675998616"
+  },
+  "optimized-100-a": {
+    "slot_6.bin": "27d2355a988c81cf2a081a8eb725016c7b559588a2263a487117eb5f8b75352c",
+    "slot_7.bin": "c1a95026599f1833933d5d791c2b4c4dc623a93a882a7ec31e16029e864c215e",
+    "slot_8.bin": "fc0b51bb0ffe9990d40200562fc9a7de24d22939f8b3368cb9076e496969ab2b"
+  },
+  "optimized-100-b": {
+    "slot_6.bin": "d7e8771c9010cd685c1b782d1c83d370225ad54cf6555ce6ca9ff19709aa5bae",
+    "slot_7.bin": "f5f3652949ccd64e8a0ee4030e95bfb1da55d4280cfada6e7f7a135d47f89e31",
+    "slot_8.bin": "117ff4e7c0066c5105ba686908dbe4d0d00ba3094dabc5175a1e872b82296f37"
+  },
+  "full-baseline-100-a": {
+    "slot_6.bin": "ec2cfb1c5a39902cbd436877e6827a2e7ade574b29432da461d3786c6f6c3134",
+    "slot_7.bin": "98623191093d2d4bded6052e8c0618a1923812e9e673fa5309ae11c7757fa621",
+    "slot_8.bin": "847127a20b76976a3eb97a0929aa9c513ada1e5d22948031ab10265e171eb32f"
+  },
+  "full-optimized-100-a": {
+    "slot_6.bin": "a752d447a82ce4c45b92b5330838437f1162010867fb2f2ccf000768dd449921",
+    "slot_7.bin": "82c09b7431bb5e2a7db77271190e4152429ecae021a6deadea060dffc527d30c",
+    "slot_8.bin": "f3a17eaf98000012961808ea7ac2a825d7e1367affe9f20e256912c55b2068f9"
+  },
+  "full-profile-100-a": {
+    "slot_6.bin": "f9a886c31f8a503a5f0d110f0b3079dbfe1bf45bb6d33990d3c3d7f68ff7666c",
+    "slot_7.bin": "96763c90565d662828559842332a892d4927e393e88ca6bbfc301d8772aadfa6",
+    "slot_8.bin": "3913117b9d3d5e82264565102f4040dc24d8b877e3ed00c91c9d3891aa12f7bf"
+  },
+  "full-baseline-100-b": {
+    "slot_6.bin": "4b8ea49e843f992c9eaf712915727d6a5ec281cd3e0d5e29fd9f2726324c4a93",
+    "slot_7.bin": "c31182d82ff6c950d4872c15bef46915eac69ae2e4f7a3c2a7863ae8b0492d65",
+    "slot_8.bin": "04e3f95ea1d833d139fa88ca9df4396ceb98f1db0c1ba29270bf8c78e35dab97"
+  },
+  "full-optimized-100-b": {
+    "slot_6.bin": "492b1f93703332efc25aa108ee672682617fd21691c14fba96e49f3720f027c0",
+    "slot_7.bin": "db4d96b539ba0ef79399922cd792aafe56b70136aec1097f5034e8e86a0a6c07",
+    "slot_8.bin": "b2cb979cc00c19a17e43081ef178b037bb4363704202655b44aff98bae102efd"
+  }
+}

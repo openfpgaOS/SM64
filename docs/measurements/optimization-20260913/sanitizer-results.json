@@ -1,0 +1,8 @@
+{
+  "renderer": "trace 10321a6709dbc527 draws 95000 uploads 26656 states 9330",
+  "renderer_regressions": "renderer: material transitions, shared colors/LOD, matrix/light changes and cache wrap passed",
+  "palettized_trace": "trace cc8ea536da4bf621 draws 95000 uploads 0 states 1000",
+  "matrix": "matrix: 100000 random cases, all alias modes and billboards passed",
+  "audio_clock": "audio: exact 60 Hz pacing, fractional carry and timer wrap passed",
+  "voices": "voices a95eda64df35e5f6 active_queries 409622"
+}

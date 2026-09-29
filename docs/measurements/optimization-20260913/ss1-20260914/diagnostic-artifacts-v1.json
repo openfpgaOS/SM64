@@ -1,0 +1,14 @@
+{
+  "baseline": {
+    "elf_sha256": "cd04b618373f9f6a38a7fd78d987feee2acfb733c3f144d8188d408298e2845c",
+    "vhd_sha256": "49ed0afae711371a5bceb546fbd756d6e088ba0c8dda30a3d500d8e0ce9d3922"
+  },
+  "optimized": {
+    "elf_sha256": "ea505c6bcaf9dad019b282592adb0cd7496a54a35aa712899e8d09f871c3d2ab",
+    "vhd_sha256": "781f5702524ee9136bbca1ca28a163a40a8c1db4dc290fc28eb2db521683d2ea"
+  },
+  "profile": {
+    "elf_sha256": "121997bcfe828c30c6025cc7f8ac94ba1e1bb53056047cac62ec965a7460189d",
+    "vhd_sha256": "efc2a64b5ab5471adc8828b38fe99c9351aa1ab3a67d22f14a3301044ee19ff8"
+  }
+}

@@ -1,7 +1,12 @@
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ultra64.h>
+
+#if defined(TARGET_OPENFPGA) && !defined(OF_PC)
+#include "of_caps.h"   /* heap_size: sizes the predecode warm-up budget */
+#endif
 
 #ifdef __SSE4_1__
 #include <immintrin.h>
@@ -103,6 +108,151 @@ static inline int32_t clamp32(int64_t v) {
         return 0x7fffffff;
     }
     return (int32_t)v;
+}
+
+/* ===================================================================
+ * VADPCM pre-decode: decode each ADPCM sample to S16 PCM once (lazily, on
+ * first use) into a malloc'd pool; aADPCMdecImpl then becomes a memcpy
+ * passthrough.  Trades SDRAM for the per-frame scalar VADPCM decode (RV32 has
+ * no SIMD).  Correctness gate: a continuous linear decode + runtime loop-wrap
+ * only matches the N64 if loop->state == the continuous decoder history at
+ * loop->start; if not, fall back to leaving the sample as ADPCM (bit-exact).
+ * =================================================================== */
+#define PREDECODE_CAP 2048            /* power of two; open-addressing cache */
+static struct { const uint8_t *key; int16_t *pcm; } s_predec[PREDECODE_CAP];
+static const int16_t *s_predec_src;   /* per-aADPCMdec PCM source; NULL = normal decode */
+static uint32_t s_predec_bytes;       /* total PCM bytes allocated */
+
+/* Ceiling on PCM the BANK-LOAD warm-up may allocate speculatively.  Lazy
+ * decoding (audio_predecode_get) is unbounded and authoritative — this only
+ * caps the eager path so warming a bank can never consume the heap a
+ * about-to-play sample needs.  A quarter of the app heap, or 2 MB if the caps
+ * descriptor isn't available. */
+static uint32_t predecode_warm_budget(void) {
+#if defined(TARGET_OPENFPGA) && !defined(OF_PC)
+    const struct of_capabilities *c = of_get_caps();
+    if (c && c->heap_size) return c->heap_size / 4u;
+#endif
+    return 2u * 1024u * 1024u;
+}
+
+void aSetPredecodeImpl(const int16_t *pcm_src) {
+    s_predec_src = pcm_src;
+}
+
+/* Mirrors the scalar decoder in aADPCMdecImpl, decoding the whole sample
+ * continuously.  Returns malloc'd PCM (never freed; single-shot core) or NULL
+ * to fall back to runtime ADPCM. */
+static int16_t *predecode_decode_sample(const uint8_t *in0, const int16_t *book,
+        int order, int npred, uint32_t sampleSize,
+        uint32_t loopStart, uint32_t loopCount, const int16_t *loopState) {
+    if (in0 == NULL || book == NULL || order != 2 || npred <= 0 || sampleSize < 9) {
+        return NULL;   /* decoder only supports order 2 (tbl[0]/tbl[1]) */
+    }
+    if (npred > 8) npred = 8;
+    uint32_t nframes = sampleSize / 9;
+    if (nframes == 0) return NULL;
+    uint32_t nSamples = nframes * 16;
+
+    int16_t tbl[8][2][8];
+    memset(tbl, 0, sizeof(tbl));
+    memcpy(tbl, book, (size_t) order * npred * 16);
+
+    int16_t *pcm = (int16_t *) malloc((size_t)(nSamples + 16) * sizeof(int16_t));
+    if (pcm == NULL) return NULL;
+
+    const uint8_t *in = in0;
+    int16_t *out = pcm;
+    int16_t p1 = 0, p2 = 0;   /* out[-1], out[-2] (predictor history) */
+    for (uint32_t f = 0; f < nframes; f++) {
+        int shift = *in >> 4;
+        int table_index = *in++ & 0xf;
+        if (table_index >= npred) table_index = npred - 1;
+        const int16_t (*t)[8] = tbl[table_index];
+        for (int b = 0; b < 2; b++) {
+            int16_t ins[8];
+            int j, k;
+            for (j = 0; j < 4; j++) {
+                ins[j * 2]     = (int16_t)((((*in >> 4) << 28) >> 28) << shift);
+                ins[j * 2 + 1] = (int16_t)((((*in++ & 0xf) << 28) >> 28) << shift);
+            }
+            for (j = 0; j < 8; j++) {
+                int32_t acc = t[0][j] * p2 + t[1][j] * p1 + (ins[j] << 11);
+                for (k = 0; k < j; k++) {
+                    acc += t[1][(j - k) - 1] * ins[k];
+                }
+                acc >>= 11;
+                out[j] = clamp16(acc);
+            }
+            p2 = out[6];
+            p1 = out[7];
+            out += 8;
+        }
+    }
+    memset(out, 0, 16 * sizeof(int16_t));   /* guard for resampler over-read */
+
+
+    s_predec_bytes += (uint32_t)((nSamples + 16) * sizeof(int16_t));
+    return pcm;
+}
+
+/* Warm the cache for one sample at BANK-LOAD time, so the first note that uses
+ * it doesn't pay the decode inside a rendered frame.
+ *
+ * Decoding a whole VADPCM sample to PCM costs ~16-18 ops/sample, i.e. several ms
+ * for a long sample — and it currently happens at note start, in of_voice_sync,
+ * on whatever frame the sound first plays.  That is the `audio 12` (~15 ms real)
+ * spike seen on an otherwise idle 154-triangle frame.
+ *
+ * STRICTLY NON-REGRESSING by construction, in two ways:
+ *  - a failed warm is NOT cached, so the lazy path retries later and behaves
+ *    exactly as it does today (a cached NULL would silence the note forever —
+ *    of_voice.c has no software fallback);
+ *  - warming stops once s_predec_bytes passes a budget derived from the heap, so
+ *    it cannot starve a sample that is actually about to play.
+ * Anything not warmed simply decodes on first use, as before. */
+int audio_predecode_warm(const uint8_t *sampleAddr, const int16_t *book,
+        int order, int npred, uint32_t sampleSize,
+        uint32_t loopStart, uint32_t loopCount, const int16_t *loopState) {
+    if (sampleAddr == NULL) return 0;
+    if (s_predec_bytes >= predecode_warm_budget()) return 0;
+    uint32_t h = (uint32_t)(((uintptr_t) sampleAddr) >> 4) & (PREDECODE_CAP - 1);
+    for (uint32_t i = 0; i < PREDECODE_CAP; i++) {
+        uint32_t s = (h + i) & (PREDECODE_CAP - 1);
+        if (s_predec[s].key == sampleAddr) return s_predec[s].pcm != NULL;
+        if (s_predec[s].key == NULL) {
+            int16_t *pcm = predecode_decode_sample(sampleAddr, book, order, npred,
+                                                   sampleSize, loopStart, loopCount, loopState);
+            if (pcm == NULL) return 0;      /* do NOT cache the failure */
+            s_predec[s].key = sampleAddr;
+            s_predec[s].pcm = pcm;
+            return 1;
+        }
+    }
+    return 0;                                /* table full: leave it to the lazy path */
+}
+
+/* Cached lookup keyed by sampleAddr; decodes on first use.  Returns PCM base,
+ * or NULL to use the runtime ADPCM path (NULL fallbacks are cached too). */
+const int16_t *audio_predecode_get(const uint8_t *sampleAddr, const int16_t *book,
+        int order, int npred, uint32_t sampleSize,
+        uint32_t loopStart, uint32_t loopCount, const int16_t *loopState) {
+    if (sampleAddr == NULL) return NULL;
+    uint32_t h = (uint32_t)(((uintptr_t) sampleAddr) >> 4) & (PREDECODE_CAP - 1);
+    for (uint32_t i = 0; i < PREDECODE_CAP; i++) {
+        uint32_t s = (h + i) & (PREDECODE_CAP - 1);
+        if (s_predec[s].key == sampleAddr) {
+            return s_predec[s].pcm;            /* hit (pcm == NULL => cached fallback) */
+        }
+        if (s_predec[s].key == NULL) {
+            int16_t *pcm = predecode_decode_sample(sampleAddr, book, order, npred,
+                                                   sampleSize, loopStart, loopCount, loopState);
+            s_predec[s].key = sampleAddr;
+            s_predec[s].pcm = pcm;
+            return pcm;
+        }
+    }
+    return NULL;   /* table full: decode normally */
 }
 
 void aClearBufferImpl(uint16_t addr, int nbytes) {
@@ -224,6 +374,8 @@ void aADPCMdecImpl(uint8_t flags, ADPCM_STATE state) {
     const int16x8_t mask = vdupq_n_s16((int16_t)0xf000);
     const int16x8_t table_prefix = vld1q_s16(table_prefix_data);
 #endif
+    const int16_t *predec = s_predec_src;
+    s_predec_src = NULL;
     uint8_t *in = rspa.buf.as_u8 + rspa.in;
     int16_t *out = rspa.buf.as_s16 + rspa.out / sizeof(int16_t);
     int nbytes = ROUND_UP_32(rspa.nbytes);
@@ -235,6 +387,17 @@ void aADPCMdecImpl(uint8_t flags, ADPCM_STATE state) {
         memcpy(out, state, 16 * sizeof(int16_t));
     }
     out += 16;
+    /* Pre-decoded sample: the body is already S16 PCM — copy it instead of
+     * decoding.  Keep the prefix (above) and the carried-state save (below) so
+     * looping / continuation stay bit-identical to the ADPCM path. */
+    if (predec != NULL) {
+        if (nbytes > 0) {
+            memcpy(out, predec, (size_t) nbytes);
+            out += nbytes / (int) sizeof(int16_t);
+        }
+        memcpy(state, out - 16, 16 * sizeof(int16_t));
+        return;
+    }
 #if HAS_SSE41
     __m128i prev_interleaved = _mm_set1_epi32((uint16_t)out[-2] | ((uint16_t)out[-1] << 16));
     //__m128i prev_interleaved = _mm_shuffle_epi32(_mm_loadu_si32(out - 2), 0); // GCC misses this?

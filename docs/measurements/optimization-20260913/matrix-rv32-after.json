@@ -1,0 +1,1 @@
+{"cases": 4000, "instructions": 305, "loads": 45, "stores": 37, "opcodes": {"addi": 9, "sw": 37, "lw": 45, "mv": 2, "mul": 36, "add": 75, "sltu": 24, "mulh": 36, "srli": 12, "slli": 12, "or": 12, "bne": 3, "lui": 1, "ret": 1}}

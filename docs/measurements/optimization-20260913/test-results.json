@@ -1,0 +1,68 @@
+{
+  "renderer": "trace 10321a6709dbc527 draws 95000 uploads 26656 states 9330",
+  "renderer_regressions": "renderer: material transitions, shared colors/LOD, matrix/light changes and cache wrap passed",
+  "palettized_trace": "trace cc8ea536da4bf621 draws 95000 uploads 0 states 1000",
+  "baseline_trace": "trace 10321a6709dbc527 draws 95000 uploads 26656 states 9330",
+  "renderer_host_benchmark": {
+    "samples_ns": {
+      "before": [
+        20.711,
+        21.165,
+        20.477,
+        20.622,
+        21.414,
+        20.543,
+        20.984,
+        20.557,
+        25.317
+      ],
+      "after": [
+        13.296,
+        13.634,
+        13.269,
+        13.385,
+        13.215,
+        13.898,
+        13.468,
+        13.446,
+        13.473
+      ]
+    },
+    "before_median_ns": 20.711,
+    "after_median_ns": 13.446,
+    "reduction_percent": 35.07797788614746
+  },
+  "matrix": "matrix: 100000 random cases, all alias modes and billboards passed",
+  "matrix_host_benchmark": {
+    "samples_ns": {
+      "before": [
+        10.447,
+        10.672,
+        10.595,
+        10.625,
+        11.335,
+        10.727,
+        10.286,
+        11.084,
+        10.906
+      ],
+      "after": [
+        10.81,
+        10.516,
+        10.118,
+        10.394,
+        10.662,
+        10.131,
+        10.621,
+        10.494,
+        10.953
+      ]
+    },
+    "before_median_ns": 10.672,
+    "after_median_ns": 10.516,
+    "reduction_percent": 1.4617691154422796
+  },
+  "audio_clock": "audio: exact 60 Hz pacing, fractional carry and timer wrap passed",
+  "voices": "voices a95eda64df35e5f6 active_queries 409622",
+  "baseline_voices": "voices a95eda64df35e5f6 active_queries 439784"
+}

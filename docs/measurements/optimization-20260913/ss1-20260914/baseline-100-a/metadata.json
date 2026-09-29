@@ -1,0 +1,9 @@
+{
+  "variant": "baseline",
+  "start_host": 1789391574.7413938,
+  "benchmark_frames": 4800,
+  "demo_countdown": 120,
+  "sound": true,
+  "core_sha256": "e427b1097ad79af3612b88e7a61a566685abdabf335dace2222510387ffd01c9",
+  "end_host": 1789391852.4931424
+}

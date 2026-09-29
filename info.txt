@@ -1,4 +1,0 @@
-PocketSM64
-
-Super Mario 64 running natively on the Analogue Pocket via a VexRiscv RISC-V soft CPU
-on the Cyclone V FPGA. Based on the sm64-port PC decompilation with a software rasterizer.

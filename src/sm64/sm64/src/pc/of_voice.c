@@ -206,27 +206,16 @@ void of_voice_sync(void) {
      * has leaked -- a looped voice whose stop we missed -> stop it.  Robust
      * catch-all for "notes stay on" regardless of cause. */
     {
-        int vi, k;
-        unsigned orphans = 0, owned = 0, active = 0;
+        uint32_t owned = 0;
         for (i = 0; i < n; i++) {
-            if (gNotes[i].priority != NOTE_PRIORITY_DISABLED) {
-                active++;   /* notes SM64 wants playing this frame */
-            }
             if (s_voice[i] >= 0) {
-                owned++;    /* notes that successfully hold a HW voice */
+                owned |= 1u << s_voice[i];
             }
         }
-        for (vi = 0; vi < OF_MIXER_MAX_VOICES; vi++) {
-            if (of_mixer_voice_active(vi)) {
-                int mine = 0;
-                for (k = 0; k < n; k++) {
-                    if (s_voice[k] == vi) { mine = 1; break; }
-                }
-                if (!mine) {
-                    of_mixer_stop(vi);
-                    orphans++;
-                }
-            }
+        for (int vi = 0; vi < OF_MIXER_MAX_VOICES; vi++) {
+            /* Owned voices were checked in the sustain path already. */
+            if (!(owned & (1u << vi)) && of_mixer_voice_active(vi))
+                of_mixer_stop(vi);
         }
     }
 }

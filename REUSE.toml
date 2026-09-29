@@ -6,6 +6,33 @@ version = 1
 # files authored by the project carry their own Apache-2.0 SPDX header and are
 # not listed here.  See LICENSES/ for every referenced license text.
 # ---------------------------------------------------------------------------
+#
+# !!! WARNING — READ BEFORE VENDORING ANY THIRD-PARTY TREE !!!
+#
+# The first [[annotations]] block below uses BARE EXTENSION GLOBS:
+#     **/*.json  **/*.md  **/*.bin  **/*.o  **/*.a  **/*.ini  **/*.cfg
+# and the "Repository dotfiles" block claims **/.gitignore as CC0
+# (c) ThinkElastic.
+#
+# Those globs are REPO-WIDE.  They match every matching file in every
+# subdirectory, INCLUDING vendored third-party trees.  Without an explicit
+# carve-out they will silently declare somebody else's data, docs, binaries
+# and dotfiles to be this project's own Apache-2.0 / CC0 work.  That is a
+# false copyright claim, not merely a lint nit.
+#
+# ORDERING SEMANTICS: when several [[annotations]] blocks match the same file,
+# the LAST matching block wins.  So every vendored tree needs a carve-out
+# APPENDED AT THE BOTTOM of this file, after the broad rules.
+#
+# If you vendor a new third-party tree, add a bottom carve-out for it that:
+#   1. sets a default rule for   "<tree>/**"
+#   2. adds explicit rules for its dotfiles, so the CC0 "**/.gitignore" rule
+#      above cannot claim them
+#   3. re-claims, LAST, only the files this project actually authored inside
+#      that tree
+#
+# The src/sm64/sm64/ carve-out at the end of this file is the worked example.
+# ---------------------------------------------------------------------------
 
 # ===== Project data / docs / build outputs / packaged distribution =========
 [[annotations]]
@@ -27,6 +54,21 @@ path = [
     "src/apps/wavdemo/audio.wav",
     "NOTICE",
 ]
+SPDX-FileCopyrightText = "(c) 2026, ThinkElastic <Think@Elastic.com>"
+SPDX-License-Identifier = "Apache-2.0"
+
+# ===== Root docs that QUOTE other people's copyright notices ================
+# README.md, NOTICE and DISTRIBUTION.md all reproduce third-party copyright
+# lines ("(c) 1996 Nintendo Co., Ltd.", "(c) 2020 Emill, MaikelChan",
+# "Copyright 1995, Silicon Graphics, Inc. ...") as part of their attribution
+# text.  Without precedence = "override" the REUSE tooling scrapes those quoted
+# lines out of the file body and reports them AS the file's own copyright
+# holders -- i.e. the generated SBOM would claim these are Apache-2.0 works of
+# Nintendo/SGI/Emill.  They are ThinkElastic's own prose ABOUT those works.
+# Any future doc that quotes an upstream copyright line must be added here.
+[[annotations]]
+path = ["README.md", "NOTICE", "DISTRIBUTION.md"]
+precedence = "override"
 SPDX-FileCopyrightText = "(c) 2026, ThinkElastic <Think@Elastic.com>"
 SPDX-License-Identifier = "Apache-2.0"
 
@@ -64,3 +106,341 @@ path = "src/sdk/platforms/mister/fatfs/**"
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright (C) 2025, ChaN"
 SPDX-License-Identifier = "BSD-1-Clause"
+
+# ###########################################################################
+# ###########################################################################
+# ##                                                                       ##
+# ##   VENDORED DECOMP CARVE-OUT — src/sm64/sm64/                          ##
+# ##                                                                       ##
+# ##   Everything below this line MUST stay at the BOTTOM of this file.    ##
+# ##   Last matching [[annotations]] block wins, so these blocks are what   ##
+# ##   stops the repo-wide extension globs at the top of the file from     ##
+# ##   claiming third-party work as ThinkElastic's Apache-2.0 / CC0 work.  ##
+# ##                                                                       ##
+# ##   src/sm64/sm64/ is a FLATTENED copy (no .gitmodules, no nested .git)  ##
+# ##   of the Super Mario 64 PC/DOS port chain.  Upstream identity, as     ##
+# ##   verified from in-tree evidence only:                                ##
+# ##       immediate upstream : fgsfdsfgs/sm64-port, branch "dos"          ##
+# ##                            (README.md title + its raw.githubusercontent##
+# ##                            .com/fgsfdsfgs/sm64-port/dos/media/ image   ##
+# ##                            URLs; Makefile TARGET_DOS ?= 1,            ##
+# ##                            COMPILER ?= ido, i586-pc-msdosdjgpp-*;     ##
+# ##                            src/pc/gfx/gfx_dos_api.c, src/pc/audio/    ##
+# ##                            audio_sb16.c, lib/{allegro,dmesa,glide3,   ##
+# ##                            osmesa})                                    ##
+# ##       fork of            : sm64-port/sm64-port                        ##
+# ##       decomp base        : n64decomp/sm64, "Refresh 11"               ##
+# ##                            (first line of CHANGES)                     ##
+# ##   The exact upstream commit SHA is NOT recoverable from this repo and  ##
+# ##   is deliberately not asserted anywhere.                              ##
+# ##                                                                       ##
+# ##   NOTHING in this subtree is licensed to this project.  The blocks     ##
+# ##   below record what each part actually is; see the LICENSES/          ##
+# ##   LicenseRef-*.txt texts, which are statements of fact, NOT grants.    ##
+# ##                                                                       ##
+# ###########################################################################
+# ###########################################################################
+
+# --- 1. DEFAULT for the whole vendored tree ---------------------------------
+# Nintendo-derived decompilation output and extracted data: the game C sources
+# and headers, asm/, actors/, levels/, data/, text/, bin/, assets/, sound/,
+# assets.json (a retail-ROM offset table), sound/sequences.json,
+# sound/sound_banks/*.json, media/ screenshots, and anything else not
+# re-classified by a later block.  No rights holder has granted any license.
+# NOTE: no copyrightable ROM media is committed here; it is extracted at build
+# time from the builder's own baserom.us.z64 (which .gitignore excludes).
+[[annotations]]
+path = "src/sm64/sm64/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Super Mario 64 (c) Nintendo Co., Ltd. -- all rights reserved; decompilation by the n64decomp/sm64 contributors. NOT a work of ThinkElastic."
+SPDX-License-Identifier = "LicenseRef-Nintendo-SM64-NoLicense"
+
+# --- 2. Port-authored (not Nintendo-derived) work, still unlicensed ---------
+# Original code by the decomp / sm64-port / sm64-port-dos contributors.  These
+# projects ship no repository-level LICENSE and make no express grant.
+# (More specific third-party rules for tools/ subdirectories follow below and
+# override this block.)
+[[annotations]]
+path = [
+    "src/sm64/sm64/src/pc/**",
+    "src/sm64/sm64/tools/**",
+    "src/sm64/sm64/doxygen/**",
+    "src/sm64/sm64/Makefile",
+    "src/sm64/sm64/Makefile.split",
+    "src/sm64/sm64/sm64.ld",
+    "src/sm64/sm64/Dockerfile",
+    "src/sm64/sm64/Doxyfile",
+    "src/sm64/sm64/Jenkinsfile",
+    "src/sm64/sm64/README.md",
+    "src/sm64/sm64/CHANGES",
+    "src/sm64/sm64/sound/README.md",
+    "src/sm64/sm64/diff.py",
+    "src/sm64/sm64/diff_settings.py",
+    "src/sm64/sm64/first-diff.py",
+    "src/sm64/sm64/extract_assets.py",
+    "src/sm64/sm64/format.sh",
+    "src/sm64/sm64/rename_sym.sh",
+    "src/sm64/sm64/charmap.txt",
+    "src/sm64/sm64/charmap_menu.txt",
+    "src/sm64/sm64/undefined_syms.txt",
+    "src/sm64/sm64/sm64.eu.sha1",
+    "src/sm64/sm64/sm64.jp.sha1",
+    "src/sm64/sm64/sm64.sh.sha1",
+    "src/sm64/sm64/sm64.us.sha1",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "(c) the n64decomp/sm64, sm64-port/sm64-port and fgsfdsfgs/sm64-port contributors -- no license terms published. NOT a work of ThinkElastic."
+SPDX-License-Identifier = "LicenseRef-SM64Port-NoLicense"
+
+# --- 3. Nintendo 64 SDK material (SGI / Nintendo) ---------------------------
+# include/PR/*.h carry a verbatim "Copyright (C) 1994, Silicon Graphics, Inc.
+# ... unpublished proprietary information ... may not be disclosed to third
+# parties or copied or duplicated in any form" notice -- an explicit
+# reservation of rights, the opposite of a grant.
+# lib/PR/**/*.bin were 24 unmodified Nintendo RSP microcode BINARIES; e.g.
+# `strings lib/PR/f3dex/F3DEX_NoN_data.bin` yielded
+# "RSP Gfx ucode F3DEX.NoN     1.23 Yoshitaka Yasumoto Nintendo."
+# tools/sdk-tools/README.md: "Decompilation of the Nintendo 64 SDK developer
+# tools".
+# NOTE: this block is placed AFTER block 2 on purpose -- tools/sdk-tools/**
+# sits under tools/** and must not fall through to the port-authored rule.
+# NOTE: lib/PR/**, lib/rsp.s and rsp/** were deleted from the index while this
+# carve-out was being written.  Their rules are kept deliberately: a REUSE.toml
+# path that matches nothing is harmless, and keeping them means the rules are
+# already correct if those paths ever come back.  (Deleting the files from the
+# tip does NOT remove them from git history.)
+[[annotations]]
+path = [
+    "src/sm64/sm64/include/PR/**",
+    "src/sm64/sm64/lib/PR/**",
+    "src/sm64/sm64/lib/asm/**",
+    "src/sm64/sm64/lib/src/**",
+    "src/sm64/sm64/lib/rsp.s",
+    "src/sm64/sm64/rsp/**",
+    "src/sm64/sm64/tools/sdk-tools/**",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "(c) Silicon Graphics, Inc. and/or Nintendo Co., Ltd. -- all rights reserved. NOT a work of ThinkElastic."
+SPDX-License-Identifier = "LicenseRef-N64SDK-NoLicense"
+
+# --- 4. tools/: genuinely licensed third-party components -------------------
+# 4a. sm64tools (queueRAM) -- MIT, text at tools/sm64tools.LICENSE
+#     NOTE: none of these .c/.h files carries an in-file copyright header.
+#     The MIT attribution rests on (i) upstream shipping tools/sm64tools.LICENSE
+#     alongside them and (ii) their being the named components of queueRAM's
+#     sm64tools (libmio0, n64cksum, n64graphics, utils).  tools/skyconv.c is
+#     DELIBERATELY NOT in this list: it has no in-file notice either, and
+#     nothing in this tree ties it to sm64tools, so claiming an MIT grant over
+#     it would be a guess.  It falls through to the port-authored "no license
+#     published" rule instead.
+[[annotations]]
+path = [
+    "src/sm64/sm64/tools/sm64tools.LICENSE",
+    "src/sm64/sm64/tools/libmio0.c",
+    "src/sm64/sm64/tools/libmio0.h",
+    "src/sm64/sm64/tools/n64cksum.c",
+    "src/sm64/sm64/tools/n64cksum.h",
+    "src/sm64/sm64/tools/n64graphics.c",
+    "src/sm64/sm64/tools/n64graphics.h",
+    "src/sm64/sm64/tools/utils.c",
+    "src/sm64/sm64/tools/utils.h",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2015-2018 queueRAM (sm64tools)"
+SPDX-License-Identifier = "MIT"
+
+# 4b. n64graphics_ci (David Benepe) -- MIT, text at
+#     tools/n64graphics_ci_dir/LICENSE.  utils.{c,h} in that directory are a
+#     copy of the queueRAM sm64tools utils; both are MIT.
+[[annotations]]
+path = "src/sm64/sm64/tools/n64graphics_ci_dir/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2019 David Benepe; portions (c) 2015-2018 queueRAM (sm64tools)"
+SPDX-License-Identifier = "MIT"
+
+# 4c. ExoQuant v0.7 (Dennis Ranke) -- MIT, notice at top of exoquant.c
+[[annotations]]
+path = "src/sm64/sm64/tools/n64graphics_ci_dir/exoquant/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2004 Dennis Ranke (ExoQuant v0.7)"
+SPDX-License-Identifier = "MIT"
+
+# 4d. armips assembler v0.11 (Kingcom) -- MIT, notice at armips.cpp:9
+#     (all upstream files concatenated into one .cpp).  That concatenation
+#     ALSO embeds a second, differently-licensed component: armips.cpp:74-100
+#     is "// file: ext/tinyformat/tinyformat.h", "Copyright (C) 2011, Chris
+#     Foster", under the Boost Software License 1.0.  Those are the only two
+#     copyright notices in the file (`grep -c Copyright` == 2), so the correct
+#     expression for this single file is the conjunction of both.
+[[annotations]]
+path = "src/sm64/sm64/tools/armips.cpp"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2009-2020 Kingcom (armips, https://github.com/Kingcom/armips/); embedded tinyformat (c) 2011 Chris Foster"
+SPDX-License-Identifier = "MIT AND BSL-1.0"
+
+# 4e. Flexible and Economical UTF-8 Decoder (Bjoern Hoehrmann) -- MIT
+[[annotations]]
+path = ["src/sm64/sm64/tools/utf8.c", "src/sm64/sm64/tools/utf8.h"]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2008-2009 Bjoern Hoehrmann <bjoern@hoehrmann.de>"
+SPDX-License-Identifier = "MIT"
+
+# 4f. stb single-file libraries (Sean Barrett) -- dual-licensed at the foot of
+#     each header: "ALTERNATIVE A - MIT License" / "ALTERNATIVE B - Public
+#     Domain (www.unlicense.org)"
+[[annotations]]
+path = "src/sm64/sm64/tools/stb/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2017 Sean Barrett (stb)"
+SPDX-License-Identifier = "MIT OR Unlicense"
+
+# 4g. libaudiofile (Michael Pruett), commit b62c902, concatenated into one
+#     .cpp with the full LGPL-2.1 text inline: "either version 2.1 of the
+#     License, or (at your option) any later version".
+#     COPYLEFT WARNING: LGPL-2.1-or-later is incompatible with claiming this
+#     as Apache-2.0 project work.  It is a build-time host tool only; it is
+#     not linked into app.elf.
+[[annotations]]
+path = [
+    "src/sm64/sm64/tools/audiofile/audiofile.cpp",
+    "src/sm64/sm64/tools/audiofile/audiofile.h",
+    "src/sm64/sm64/tools/audiofile/aupvlist.h",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) Michael Pruett and the libaudiofile contributors"
+SPDX-License-Identifier = "LGPL-2.1-or-later"
+
+# 4h. SGI IDO 5.3 compiler -- IRIX MIPS BINARIES (usr/bin/cc, usr/lib/*,
+#     lib/*), shipped upstream with the SGI Freeware legal notice at
+#     tools/ido5.3_compiler/LICENSE.md ("Copyright 1995, Silicon Graphics,
+#     Inc. -- ALL RIGHTS RESERVED").  Whether that notice actually covers IDO
+#     is NOT established by anything in this tree; see the LicenseRef text.
+[[annotations]]
+path = "src/sm64/sm64/tools/ido5.3_compiler/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright 1995, Silicon Graphics, Inc. -- ALL RIGHTS RESERVED"
+SPDX-License-Identifier = "LicenseRef-SGI-Freeware"
+
+# --- 5. Fast3D renderer -- SOURCE-REDISTRIBUTION ONLY -----------------------
+# src/sm64/sm64/src/pc/gfx/LICENSE.txt, (c) 2020 Emill, MaikelChan, clause 2:
+#     "Redistributions in binary form are not allowed."
+# This governs the WHOLE directory (see its README.md: "Redistributions are
+# allowed only in source form, not in binary form"), and it is the reason this
+# repository is source-only and ships no prebuilt binaries.  Some files in the
+# directory (gfx_dos_api.c, gfx_soft.c, the SDL/DOS backends) are by the
+# sm64-port / sm64-port-dos contributors rather than by Emill and MaikelChan,
+# but the directory-level notice is the only license statement upstream ships
+# for any of them.
+[[annotations]]
+path = "src/sm64/sm64/src/pc/gfx/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2020 Emill, MaikelChan; portions (c) the sm64-port and fgsfdsfgs/sm64-port contributors"
+SPDX-License-Identifier = "LicenseRef-Fast3D-NoBinaryRedist"
+
+# --- 5b. MICROSOFT headers that happen to live inside src/pc/gfx/ -----------
+# src/pc/gfx/dxsdk/ holds four Direct3D 12 headers copied from the Windows SDK
+# by the upstream port for its gfx_direct3d12.cpp backend (which this project
+# does not build).  They are Microsoft's, NOT Emill/MaikelChan's, so the
+# directory-wide Fast3D rule above MUST NOT be allowed to claim them.
+#   d3d12.h:3, d3d12sdklayers.h:3   " * Copyright (c) Microsoft Corporation"
+#   d3dcommon.h                     MIDL-generated, no copyright line at all
+# No license text for these three is vendored and none is stated in-tree.
+[[annotations]]
+path = "src/sm64/sm64/src/pc/gfx/dxsdk/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) Microsoft Corporation -- Direct3D 12 headers from the Windows SDK. NOT a work of ThinkElastic, Emill or MaikelChan."
+SPDX-License-Identifier = "LicenseRef-MicrosoftDirectX-Unclear"
+
+# d3dx12.h is the one file in that directory that DOES state its own terms,
+# at d3dx12.h:3-4: "Copyright (c) Microsoft. All rights reserved. / This code
+# is licensed under the MIT License (MIT)."
+[[annotations]]
+path = "src/sm64/sm64/src/pc/gfx/dxsdk/d3dx12.h"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) Microsoft Corporation"
+SPDX-License-Identifier = "MIT"
+
+# --- 6. DOS-port third-party libraries -- provenance UNRESOLVED -------------
+# Not used by the openfpgaOS build; retained only to keep the vendored tree a
+# faithful copy of upstream.  Most of the payload (*.a) is excluded by the
+# vendored .gitignore; what remains tracked is lib/glide3/dxe.c, the
+# lib/glide3/drivers/*.dxe binaries (copied from the DOjS repository per
+# lib/glide3/drivers/README.md), and the two README.DJ files.  See the
+# LicenseRef text for exactly what could and could not be verified.
+[[annotations]]
+path = [
+    "src/sm64/sm64/lib/allegro/**",
+    "src/sm64/sm64/lib/dmesa/**",
+    "src/sm64/sm64/lib/glide3/**",
+    "src/sm64/sm64/lib/osmesa/**",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Third-party DOS/DJGPP libraries (Mesa/OSMesa DJGPP ports, 3Dfx Glide3 via DOjS, Allegro); rights belong to their respective authors -- provenance unresolved"
+SPDX-License-Identifier = "LicenseRef-DOSPort-ThirdParty-Unclear"
+
+# --- 7. Upstream dotfiles ---------------------------------------------------
+# EXPLICIT so the repo-wide `"**/.gitignore"` CC0 (c) ThinkElastic rule near
+# the top of this file cannot claim upstream's dotfiles.  These were written
+# by the decomp/port contributors, not by this project.
+[[annotations]]
+path = [
+    "src/sm64/sm64/.gitignore",
+    "src/sm64/sm64/**/.gitignore",
+    "src/sm64/sm64/.gitattributes",
+    "src/sm64/sm64/.clang-format",
+    "src/sm64/sm64/.clang-tidy",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "(c) the n64decomp/sm64, sm64-port/sm64-port and fgsfdsfgs/sm64-port contributors -- no license terms published. NOT a work of ThinkElastic."
+SPDX-License-Identifier = "LicenseRef-SM64Port-NoLicense"
+
+# ###########################################################################
+# ##   FINAL BLOCK — this project's OWN files inside the vendored tree      ##
+# ###########################################################################
+#
+# These files were written by ThinkElastic for this core.  They live inside
+# src/sm64/sm64/ only because they must sit next to the code they extend (or,
+# for UPSTREAM.md, next to the tree they document), so they need re-claiming
+# here after the blanket rules above.  Without the UPSTREAM.md rule the
+# default `src/sm64/sm64/**` block declares this project's own provenance
+# document to be "Super Mario 64 (c) Nintendo Co., Ltd.", which is false.
+#
+# HONESTY NOTE, please do not "simplify" this away: an Apache-2.0 grant on
+# these files does NOT make the built artifact redistributable.
+#   * gfx_gpu.{c,h} sit INSIDE src/pc/gfx/ and implement the GfxRenderingAPI
+#     declared by that directory's gfx_rendering_api.h.  They are a derivative
+#     of the Emill/MaikelChan Fast3D renderer and are therefore ALSO bound by
+#     its clause 2, "Redistributions in binary form are not allowed."  That is
+#     why the identifier below is an AND expression, not plain Apache-2.0.
+#   * of_voice.{c,h} are not Fast3D derivatives, so they are Apache-2.0 alone
+#     -- but they are compiled into the same app.elf as the Fast3D renderer
+#     and the unlicensed decompilation, so that binary still may not be
+#     redistributed.  Source-only distribution is not a stylistic choice.
+
+[[annotations]]
+path = [
+    "src/sm64/sm64/src/pc/gfx/gfx_gpu.c",
+    "src/sm64/sm64/src/pc/gfx/gfx_gpu.h",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "(c) 2026, ThinkElastic <Think@Elastic.com>"
+SPDX-License-Identifier = "Apache-2.0 AND LicenseRef-Fast3D-NoBinaryRedist"
+
+[[annotations]]
+path = [
+    "src/sm64/sm64/src/pc/of_voice.c",
+    "src/sm64/sm64/src/pc/of_voice.h",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "(c) 2026, ThinkElastic <Think@Elastic.com>"
+SPDX-License-Identifier = "Apache-2.0"
+
+# UPSTREAM.md is this project's own provenance record for the vendored tree.
+# precedence = "override" is required as well as the path rule: the document
+# quotes upstream copyright strings, which the tooling would otherwise scrape
+# and report as this file's own rights holders.
+[[annotations]]
+path = "src/sm64/sm64/UPSTREAM.md"
+precedence = "override"
+SPDX-FileCopyrightText = "(c) 2026, ThinkElastic <Think@Elastic.com>"
+SPDX-License-Identifier = "Apache-2.0"

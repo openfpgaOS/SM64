@@ -566,7 +566,75 @@ l2:
 #undef PATCH_SOUND
 }
 
+#ifdef TARGET_OPENFPGA
+/* Pre-decode every sample a freshly loaded bank can play, here at load time,
+ * instead of paying for it inside the frame where the sound first triggers.
+ * The HW-voice backend (pc/of_voice.c) needs S16 PCM in SDRAM, so every note
+ * start currently risks a multi-millisecond VADPCM decode on the critical path.
+ * A level load is already a long, hitch-invisible operation; a gameplay frame
+ * is not.
+ *
+ * audio_predecode_warm is best-effort and budgeted: a sample it declines simply
+ * decodes lazily on first use exactly as before, so this can only remove work,
+ * never add a failure mode.  See the comment on it in pc/mixer.c. */
+extern int audio_predecode_warm(const u8 *sampleAddr, const s16 *book,
+        int order, int npred, u32 sampleSize,
+        u32 loopStart, u32 loopCount, const s16 *loopState);
+
+static void predecode_warm_sound(struct AudioBankSound *sound) {
+    struct AudioBankSample *smp;
+    struct AdpcmLoop *loop;
+    struct AdpcmBook *book;
+    if (sound == NULL || sound->sample == NULL) {
+        return;
+    }
+    smp = sound->sample;
+    if (smp->sampleAddr == NULL || smp->book == NULL) {
+        return;
+    }
+    loop = smp->loop;
+    book = smp->book;
+    audio_predecode_warm(smp->sampleAddr, book->book, (int) book->order,
+                         (int) book->npredictors, smp->sampleSize,
+                         loop ? loop->start : 0, loop ? loop->count : 0,
+                         loop ? loop->state : NULL);
+}
+
+static void predecode_warm_bank(struct AudioBank *bank, u32 numInstruments, u32 numDrums) {
+    u32 i;
+    if (bank == NULL) {
+        return;
+    }
+    for (i = 0; i < numInstruments; i++) {
+        struct Instrument *inst = bank->instruments[i];
+        if (inst == NULL) {
+            continue;
+        }
+        predecode_warm_sound(&inst->lowNotesSound);
+        predecode_warm_sound(&inst->normalNotesSound);
+        predecode_warm_sound(&inst->highNotesSound);
+    }
+    if (bank->drums != NULL) {
+        for (i = 0; i < numDrums; i++) {
+            struct Drum *drum = bank->drums[i];
+            if (drum != NULL) {
+                predecode_warm_sound(&drum->sound);
+            }
+        }
+    }
+}
+#else
+#define predecode_warm_bank(b, ni, nd) ((void) 0)
+#endif
+
 struct AudioBank *bank_load_immediate(s32 bankId, s32 arg1) {
+#ifdef OF_DBG_SHADE
+    /* SHADE-probe host build: the bank ctl/tbl offset fixup overflows the 64-bit
+     * host pointer (32-bit ROM offset + base), faulting in osPiStartDma. Audio is
+     * irrelevant to the title-screen head render — skip the bank load. */
+    (void)bankId; (void)arg1;
+    return NULL;
+#endif
     UNUSED u32 pad1[4];
     u32 buf[4];
     u32 numInstruments, numDrums;
@@ -595,6 +663,7 @@ struct AudioBank *bank_load_immediate(s32 bankId, s32 arg1) {
     gCtlEntries[bankId].instruments = ret->instruments;
     gCtlEntries[bankId].drums = ret->drums;
     gBankLoadStatus[bankId] = SOUND_LOAD_STATUS_COMPLETE;
+    predecode_warm_bank(ret, numInstruments, numDrums);
     return ret;
 }
 
@@ -655,6 +724,10 @@ struct AudioBank *bank_load_async(s32 bankId, s32 arg1, struct SequencePlayer *s
 }
 
 void *sequence_dma_immediate(s32 seqId, s32 arg1) {
+#ifdef OF_DBG_SHADE
+    (void)seqId; (void)arg1;   /* SHADE probe: skip audio DMA (bad 64-bit fixup) */
+    return NULL;
+#endif
     s32 seqLength;
     void *ptr;
     u8 *seqData;
@@ -816,6 +889,14 @@ void preload_sequence(u32 seqId, u8 preloadMask) {
 void load_sequence_internal(u32 player, u32 seqId, s32 loadAsync);
 
 void load_sequence(u32 player, u32 seqId, s32 loadAsync) {
+#ifdef OF_DBG_SHADE
+    /* SHADE-probe host build: the audio bank/sequence offset fixups corrupt the
+     * 64-bit host pointer (a 32-bit ROM offset overflows the base add), faulting
+     * in osPiStartDma. The title-screen head renders without music, so skip the
+     * whole sequence load while capturing the per-vertex SHADE diagnostic. */
+    (void)player; (void)seqId; (void)loadAsync;
+    return;
+#endif
     if (!loadAsync) {
         gAudioLoadLock = AUDIO_LOCK_LOADING;
     }

@@ -94,22 +94,36 @@ void send_display_list(struct SPTask *spTask) {
  * render frame, while bounding the worst-case CPU spent on audio per frame so
  * a long frame can't spiral. */
 #define AUDIO_MAX_SUBFRAMES 8
+/* Free-running hardware cycle counter.  The desktop build also defines
+ * TARGET_OPENFPGA but has no such MMIO, so stub it there. */
+#ifdef OF_PC
+#define AUDIO_PROF_TMR() 0u
+#else
+#define AUDIO_PROF_TMR() (*(volatile uint32_t *)0x40000004)
+#endif
 #endif
 
+/* SM64 #defines printf to nothing (above) and term_printf is TARGET_POCKET-only
+ * (unlinked in this build), so re-enable real musl printf for the OTHER line —
+ * same source it reaches from gfx_pc.c's PERF line.  Nothing else in this file
+ * uses printf, so the undef is safe for the remainder. */
+#undef printf
 
 void produce_one_frame(void) {
-#ifdef TARGET_POCKET
-    static int _pf_cnt = 0;
-    uint32_t _pf0 = *(volatile uint32_t *)0x40000004;
-#endif
     gfx_start_frame();
     game_loop_one_iteration();
-#ifdef TARGET_POCKET
-    uint32_t _pf1 = *(volatile uint32_t *)0x40000004;
-#endif
 
     if (configEnableSound) {
 #ifdef TARGET_OPENFPGA
+        /* Time the pump and ACCUMULATE (dropped catch-up frames pump too, and
+         * their cost lands in the next rendered frame's PERF `other`).  This is
+         * the one number that tells cap-idle apart from real work in `other`:
+         * a light frame idling at the 30 Hz sim cap shows audio ~0, whereas a
+         * first-touch VADPCM predecode shows up here directly. */
+#if SM64_PROFILE
+        extern unsigned g_prof_audio;
+        uint32_t _au0 = AUDIO_PROF_TMR();
+#endif
         /* Decouple audio from render fps.  The HW mixer drains the ring at a
          * constant 48 kHz, so producing until the ring holds `target` pairs
          * yields ~60 audio updates/sec (correct music tempo) no matter how
@@ -131,6 +145,9 @@ void produce_one_frame(void) {
             create_next_audio_buffer(audio_buffer, frame_samples);
             audio_api->play((u8 *)audio_buffer, frame_samples * 4);
         }
+#if SM64_PROFILE
+        g_prof_audio += AUDIO_PROF_TMR() - _au0;
+#endif
 #else
         int samples_left = audio_api->buffered();
         u32 num_audio_samples = samples_left < audio_api->get_desired_buffered() ? SAMPLES_HIGH : SAMPLES_LOW;
@@ -142,18 +159,7 @@ void produce_one_frame(void) {
 #endif
     }
 
-#ifdef TARGET_POCKET
-    uint32_t _pf2 = *(volatile uint32_t *)0x40000004;
-#endif
     gfx_end_frame();
-#ifdef TARGET_POCKET
-    uint32_t _pf3 = *(volatile uint32_t *)0x40000004;
-    if (++_pf_cnt % 60 == 0) {
-        extern void term_printf(const char *fmt, ...);
-        term_printf("FRAME game=%u audio=%u gfx_end=%u total=%u (%u ms)\n",
-            _pf1-_pf0, _pf2-_pf1, _pf3-_pf2, _pf3-_pf0, (_pf3-_pf0)/110000);
-    }
-#endif
 }
 
 #ifdef TARGET_WEB
@@ -226,6 +232,12 @@ void main_func(void) {
     configScreenHeight = 240;
     configEnableSound = true;   /* Sound banks bundled via sm64/sound/sound_data.c */
     configFullscreen = false;
+#ifdef OF_DBG_SHADE
+    /* SHADE probe: host desktop build has no N64 ROM-DMA path for the sound
+     * banks (osPiStartDma faults); the title-screen head renders without audio,
+     * so silence it while capturing the per-vertex SHADE diagnostic. */
+    configEnableSound = false;
+#endif
 #endif
 
 #ifdef TARGET_WEB
@@ -348,9 +360,11 @@ void main_func(void) {
 #endif
 }
 
-#if defined(TARGET_OPENFPGA)
+#if defined(TARGET_OPENFPGA) && !defined(OF_PC)
 /* Quick smoke test for FixedPointMacPlugin custom instructions.
- * Uses term_printf directly since SM64 #defines printf away. */
+ * Uses term_printf directly since SM64 #defines printf away.
+ * RISC-V custom .insn — excluded from the host (OF_PC) desktop build, which
+ * provides its own main() via pocket/main_of.c. */
 static void test_fx_instructions(void) {
     extern void term_printf(const char *fmt, ...);
     int result;
@@ -392,6 +406,8 @@ void sm64_main(void) {
     test_fx_instructions();
     main_func();
 }
+#elif defined(OF_PC)
+/* Host desktop build provides main() via pocket/main_of.c. */
 #elif defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
 int WINAPI WinMain(UNUSED HINSTANCE hInstance, UNUSED HINSTANCE hPrevInstance, UNUSED LPSTR pCmdLine, UNUSED int nCmdShow) {

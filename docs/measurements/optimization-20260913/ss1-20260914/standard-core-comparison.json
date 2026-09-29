@@ -1,0 +1,39 @@
+{
+  "core": "standard MiSTer 0.9.5, 100 MHz, indexed-color fallback",
+  "records_per_run": 4800,
+  "matched_game_state_records": 4800,
+  "state_fields": "game tick, level, area, demo index/activity, Mario action/position, camera position",
+  "interpretation": "No meaningful gameplay FPS improvement on this core. It does not include the truecolor and vertex-cache paths targeted by the main renderer optimizations. Audio pacing differs intentionally between builds.",
+  "scenes": [
+    {
+      "level": 30,
+      "frames": 724,
+      "baseline_rendered_fps": 22.344168972564216,
+      "optimized_rendered_fps": 22.265153226673867
+    },
+    {
+      "level": 24,
+      "frames": 632,
+      "baseline_rendered_fps": 21.98908005224113,
+      "optimized_rendered_fps": 21.84940885026183
+    },
+    {
+      "level": 5,
+      "frames": 971,
+      "baseline_rendered_fps": 22.22034240868697,
+      "optimized_rendered_fps": 22.067764332696576
+    },
+    {
+      "level": 4,
+      "frames": 858,
+      "baseline_rendered_fps": 22.80562957489922,
+      "optimized_rendered_fps": 22.702366802070568
+    },
+    {
+      "level": 12,
+      "frames": 766,
+      "baseline_rendered_fps": 18.41809449913693,
+      "optimized_rendered_fps": 18.303473705984498
+    }
+  ]
+}

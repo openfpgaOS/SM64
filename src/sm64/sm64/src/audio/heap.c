@@ -779,10 +779,12 @@ void audio_reset_session(void) {
      * audio_pocket.c's SM64_RATE / the pc_main pump track it. */
     if (gAiFrequency > 22050) gAiFrequency = 22050;
     gMaxSimultaneousNotes = preset->maxSimultaneousNotes;
-    /* Cheap audio knob: cap simultaneous voices (16 -> 12) to cut the per-update
-     * note loop ~25%.  Busy sequences voice-steal sooner (occasional dropped
-     * notes); all downstream sizing uses this clamped value. */
-    if (gMaxSimultaneousNotes > 12) gMaxSimultaneousNotes = 12;
+    /* The old cheap knob clamped this to 12 to cut the per-update note loop ~25%
+     * -- which voice-stole busy sequences down to 12 (the "~1/3 of the music's
+     * notes missing" symptom).  That CPU cost is GONE: synthesis now runs on the
+     * os30 HW mixer (of_voice.c), ~0 ms/frame, with 32 HW voices available.  So
+     * restore the preset's STOCK note count (16, or 20 for preset 7) -- the value
+     * the audio heap was originally sized for, and well under the 32 HW voices. */
     gSamplesPerFrameTarget = ALIGN16(gAiFrequency / 60);
     gReverbDownsampleRate = preset->reverbDownsampleRate;
 

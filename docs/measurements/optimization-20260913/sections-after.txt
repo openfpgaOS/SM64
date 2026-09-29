@@ -1,0 +1,19 @@
+/home/alberto/Repos/SM64/.obj/sm64/app.elf  :
+section               size        addr
+.text              9653400   272629760
+.eh_frame               64   282283160
+.init_array              4   282283224
+.data              2748268   282283232
+.bss               3381108   285032448
+.debug_info          35977           0
+.debug_abbrev        11357           0
+.debug_loclists      58549           0
+.debug_aranges         984           0
+.debug_rnglists       4610           0
+.debug_line          85991           0
+.debug_str            3025           0
+.debug_line_str       1647           0
+.debug_frame          1488           0
+Total             15986472
+
+

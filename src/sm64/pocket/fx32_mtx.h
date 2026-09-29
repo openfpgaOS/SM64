@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 #ifndef FX32_MTX_H
 #define FX32_MTX_H
 

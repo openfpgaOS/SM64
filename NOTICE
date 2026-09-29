@@ -36,9 +36,146 @@ and the LICENSES/ directory.
     openfpgaOS repository's NOTICE before redistributing these binaries.
 
 ================================================================================
+Super Mario 64 (src/sm64/sm64/)
+================================================================================
+
+The game tree under src/sm64/sm64/ is a vendored, flattened copy of a
+Super Mario 64 PC port. It is NOT work of this project except where a file
+carries this project's own copyright header. Its provenance is recorded in
+src/sm64/sm64/UPSTREAM.md. The attribution chain, in order:
+
+* Nintendo Co., Ltd.
+    Original author of Super Mario 64 (1996) — the game design, code, music,
+    art and all other original content. Super Mario 64 and Mario are
+    trademarks of Nintendo. ALL RIGHTS RESERVED. Nothing in this repository
+    grants any right in Nintendo's work.
+
+* The n64decomp/sm64 contributors
+    The reverse-engineered, matching decompilation of the retail N64 ROM:
+    the C sources under src/, levels/, actors/, data/, text/, the asset
+    extraction tooling, and the build system. The vendored tree is at
+    decomp "Refresh 11" (src/sm64/sm64/CHANGES:1). This decompiled C
+    describes Nintendo's program and remains subject to Nintendo's rights.
+
+* The sm64-port contributors (sm64-port/sm64-port)
+    The N64-free port layer: src/pc/ (window/audio/controller backends,
+    configfile, mixer, ultra_reimplementation) and the desktop build.
+
+* fgsfdsfgs
+    The DOS fork of sm64-port that this tree is actually vendored from
+    (branch "dos"): the DJGPP toolchain wiring, gfx_dos_api.c,
+    audio_sb16.c, the custom software rasterizer, and lib/{allegro,dmesa,
+    glide3,osmesa}. See src/sm64/sm64/README.md:3-9.
+
+* Emill and MaikelChan — Fast3D PC renderer, src/sm64/sm64/src/pc/gfx/
+    Copyright (c) 2020 Emill, MaikelChan. Source-only license: see
+    src/sm64/sm64/src/pc/gfx/LICENSE.txt. It permits redistribution in
+    SOURCE form only and states explicitly:
+        "Redistributions in binary form are not allowed."
+    This covers gfx_pc.c, gfx_cc.c and the whole src/pc/gfx/ directory,
+    INCLUDING this project's own gfx_gpu.c, which lives inside it and is a
+    backend for that renderer. Consequently no compiled artifact containing
+    this renderer may be redistributed. This is one of the reasons this
+    project is distributed as source only.
+
+* Silicon Graphics, Inc.
+    The libultra / Fast3D N64 SDK headers under include/PR/, which carry SGI's
+    own notice verbatim (include/PR/gbi.h:3): "Copyright (C) 1994, Silicon
+    Graphics, Inc. ... unpublished proprietary information ... may not be
+    disclosed to third parties or copied or duplicated in any form"; the
+    libultra reimplementation under lib/asm/ and lib/src/; and the IDO 5.3
+    MIPS compiler shipped under src/sm64/sm64/tools/ido5.3_compiler/ — which
+    carries SGI's own notice, "Copyright 1995, Silicon Graphics, Inc. -- ALL
+    RIGHTS RESERVED" (tools/ido5.3_compiler/LICENSE.md:2). This material is
+    proprietary and is neither Apache-2.0 nor any other license this project
+    can grant.
+
+* Nintendo RSP microcode — src/sm64/sm64/lib/PR/{f3dex,f3dex2,s2dex}/*.bin
+    The upstream tree ships 24 prebuilt RSP graphics microcode binaries
+    authored by Nintendo; e.g. F3DEX_NoN_data.bin contained the string
+        "RSP Gfx ucode F3DEX.NoN 1.23 Yoshitaka Yasumoto Nintendo."
+    read out of the tracked file before it was removed. Proprietary Nintendo
+    binaries, not used by the openfpgaOS build and not this project's work.
+    THESE FILES HAVE SINCE BEEN DELETED from this repository's working tree
+    and index (together with lib/rsp.s and rsp/). They remain reachable in
+    git history, so this attribution is retained; it applies to any checkout
+    or history rewrite in which they are present.
+
+* Microsoft Corporation — src/sm64/sm64/src/pc/gfx/dxsdk/
+    Four Direct3D 12 headers copied from the Windows SDK by the upstream port
+    for its Direct3D 12 backend (not built by this project): d3d12.h,
+    d3d12sdklayers.h, d3dcommon.h and d3dx12.h. d3dx12.h:3-4 states "Copyright
+    (c) Microsoft. All rights reserved. / This code is licensed under the MIT
+    License (MIT)". The other three carry only "Copyright (c) Microsoft
+    Corporation" (or, for the MIDL-generated d3dcommon.h, no notice at all)
+    and no license text is vendored for them; their terms are unresolved here.
+    They are NOT covered by the Emill/MaikelChan license despite sitting
+    inside src/pc/gfx/.
+
+* Nintendo-derived data tables under src/sm64/sm64/
+    assets.json (ROM offset/asset table), sound/sequences.json and
+    sound/sound_banks/*.json describe the layout and contents of Nintendo's
+    ROM data. They are decomp artifacts, not this project's work.
+
+Tools vendored under src/sm64/sm64/tools/ (each verified from an in-tree
+copyright header, except where noted otherwise on the entry itself):
+
+* queueRAM — sm64tools: n64graphics.{c,h}, libmio0.{c,h}, n64cksum.{c,h},
+    utils.{c,h}. MIT (tools/sm64tools.LICENSE:3, "Copyright (c) 2015-2018
+    queueRAM"). None of those .c/.h files carries an in-file notice; the
+    attribution rests on upstream shipping sm64tools.LICENSE beside them and
+    on their being the named components of sm64tools. Other unheadered files
+    in tools/ (skyconv.c, textconv.c, hashtable.c, aifc_decode.c,
+    aiff_extract_codebook.c, extract_data_for_mio.c, patch_libultra_math.c,
+    gen_asset_list.cpp, asm_processor/, the *.py and *.sh helpers) are NOT
+    attributed to queueRAM — nothing in the tree ties them to sm64tools, so
+    they are treated as decomp-contributor work with no published terms.
+* David Benepe — n64graphics_ci. MIT (tools/n64graphics_ci_dir/LICENSE:3).
+* Dennis Ranke — ExoQuant color quantizer. MIT, (c) 2004
+    (tools/n64graphics_ci_dir/exoquant/exoquant.h:4).
+* Kingcom — armips assembler. MIT, (c) 2009-2020 (tools/armips.cpp:9).
+    It embeds tinyformat, (c) 2011 Chris Foster, Boost Software License 1.0
+    (tools/armips.cpp:76).
+* Bjoern Hoehrmann — UTF-8 decoder. MIT, (c) 2008-2009 (tools/utf8.c:6).
+* Sean Barrett — stb_image / stb_image_write. Dual MIT / public domain,
+    (c) 2017 (tools/stb/stb_image.h, tools/stb/stb_image_write.h).
+* Michael Pruett — Audio File Library (libaudiofile), amalgamated into
+    tools/audiofile/. LGPL-2.1-or-later (tools/audiofile/audiofile.h:3).
+* simonlindholm — asm-processor (tools/asm_processor/asm-processor.py).
+    Widely credited upstream; the vendored file carries no copyright header,
+    so this attribution is by lineage rather than in-tree evidence.
+* tools/sdk-tools/ (adpcm, tabledesign) is described in its own README as a
+    "Decompilation of the Nintendo 64 SDK developer tools" and is therefore
+    derived from Nintendo/SGI SDK tooling.
+
+================================================================================
+Nintendo disclaimer / no ROM data
+================================================================================
+
+This project is not affiliated with, endorsed by, sponsored by, or in any way
+officially connected to Nintendo Co., Ltd. or any of its subsidiaries or
+affiliates. "Super Mario 64", "Mario" and "Nintendo 64" are trademarks of
+Nintendo, used here only to identify the work being described.
+
+No ROM, ROM image, or ROM-derived asset is distributed by this repository.
+This is a source-only distribution. Building the core requires the user to
+supply their own legally obtained copy of the retail ROM (baserom.us.z64);
+the build extracts textures, sound and other media from that file locally.
+Extracted assets, the resulting build/ tree, and any compiled binary are
+therefore local to the user and MUST NOT be redistributed — both because
+they contain Nintendo's copyrighted data and because of the binary
+redistribution ban on the Fast3D renderer noted above.
+
+================================================================================
 NOTE
 ================================================================================
 
 The SC-55 sample bank and the .mod modules are third-party media and remain
 under their owners' rights even though they are attributed here. Confirm
 distribution rights or replace them before shipping built artifacts.
+
+Nothing under src/sm64/sm64/ is licensed by this project. The Apache-2.0
+grant in the LICENSE file applies only to files authored by ThinkElastic.
+Where a broad rule in REUSE.toml would otherwise sweep an upstream file into
+this project's copyright, this NOTICE and src/sm64/sm64/UPSTREAM.md are the
+statement of actual provenance.

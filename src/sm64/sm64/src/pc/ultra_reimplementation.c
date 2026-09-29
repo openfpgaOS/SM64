@@ -1,5 +1,19 @@
 #include <stdio.h>
 #include <string.h>
+
+/* openfpgaOS resolves fopen() by name against the core's APF data slots (see
+ * of_file.h).  Only a slot declared "nonvolatile": true is committed back to
+ * the SD card; everything else lives in RAM for the session and is gone on a
+ * cold boot.  dist/sm64/Cores/ThinkElastic.SM64/data.json declares slots 10-19
+ * as the nonvolatile save slots, and the generated instance JSON binds slot 10
+ * to this filename -- so the name below is load-bearing, not cosmetic.
+ *
+ * The previous name ("sm64_save_file.bin") matched no slot, which is why saves
+ * survived a session (SM64 keeps gSaveBuffer in RAM) but never a cold reboot.
+ * There was also a TARGET_POCKET branch here that wrote to a hardcoded SDRAM
+ * address; TARGET_POCKET is defined nowhere in the tree, so it was dead, and
+ * SDRAM is volatile so it could not have persisted a cold boot at any address. */
+#define SAVE_FILENAME "sm64.sav"
 #include "lib/src/libultra_internal.h"
 #include "macros.h"
 
@@ -130,21 +144,7 @@ s32 osEepromLongRead(UNUSED OSMesgQueue *mq, u8 address, u8 *buffer, int nbytes)
     u8 content[512];
     s32 ret = -1;
 
-#if defined(TARGET_POCKET)
-    /* Pocket: read from a fixed SDRAM save region.
-     * The save area is at the end of SDRAM, 4KB reserved.
-     * A magic value marks whether save data exists. */
-    #define SAVE_MAGIC 0x534D3634 /* "SM64" */
-    #define SAVE_ADDR  0x13FFF000 /* End of SDRAM - 4KB */
-    volatile u32 *save_base = (volatile u32 *)SAVE_ADDR;
-    if (save_base[0] == SAVE_MAGIC) {
-        volatile u8 *save_data = (volatile u8 *)(SAVE_ADDR + 4);
-        for (int i = 0; i < 512; i++)
-            content[i] = save_data[i];
-        memcpy(buffer, content + address * 8, nbytes);
-        ret = 0;
-    }
-#elif defined(TARGET_WEB)
+#if defined(TARGET_WEB)
     if (EM_ASM_INT({
         var s = localStorage.sm64_save_file;
         if (s && s.length === 684) {
@@ -165,7 +165,7 @@ s32 osEepromLongRead(UNUSED OSMesgQueue *mq, u8 address, u8 *buffer, int nbytes)
         ret = 0;
     }
 #else
-    FILE *fp = fopen("sm64_save_file.bin", "rb");
+    FILE *fp = fopen(SAVE_FILENAME, "rb");
     if (fp == NULL) {
         return -1;
     }
@@ -185,19 +185,7 @@ s32 osEepromLongWrite(UNUSED OSMesgQueue *mq, u8 address, u8 *buffer, int nbytes
     }
     memcpy(content + address * 8, buffer, nbytes);
 
-#if defined(TARGET_POCKET)
-    /* Pocket: write to fixed SDRAM save region */
-    #ifndef SAVE_MAGIC
-    #define SAVE_MAGIC 0x534D3634
-    #define SAVE_ADDR  0x13FFF000
-    #endif
-    volatile u32 *save_base = (volatile u32 *)SAVE_ADDR;
-    volatile u8 *save_data = (volatile u8 *)(SAVE_ADDR + 4);
-    for (int i = 0; i < 512; i++)
-        save_data[i] = content[i];
-    save_base[0] = SAVE_MAGIC; /* Write magic last */
-    s32 ret = 0;
-#elif defined(TARGET_WEB)
+#if defined(TARGET_WEB)
     EM_ASM({
         var str = "";
         for (var i = 0; i < 512; i++) {
@@ -207,7 +195,7 @@ s32 osEepromLongWrite(UNUSED OSMesgQueue *mq, u8 address, u8 *buffer, int nbytes
     }, content);
     s32 ret = 0;
 #else
-    FILE* fp = fopen("sm64_save_file.bin", "wb");
+    FILE* fp = fopen(SAVE_FILENAME, "wb");
     if (fp == NULL) {
         return -1;
     }

@@ -4,6 +4,9 @@
 #include <string.h>
 #include <stdbool.h>
 #include <assert.h>
+#if defined(OF_DBG_SHADE) || defined(OF_DBG_FACE)
+#include <stdio.h>
+#endif
 
 #ifndef _LANGUAGE_C
 #define _LANGUAGE_C
@@ -18,16 +21,41 @@
 
 #include "pc/configfile.h"
 
-/* The per-frame render diagnostics below (PROF clr/dl/flush/swap/tot + TRI
- * tot/rej/cull/clip/dir) were written for the old TARGET_POCKET macro, but this
- * build defines TARGET_OPENFPGA — so they were silently compiled out.  Alias so
- * they fire again.  Left DORMANT by default — define TARGET_POCKET to re-enable
- * the per-frame PROF/EMIT/RING/FLUSH/TRI dumps. */
+#ifdef TARGET_OPENFPGA
+#include "gfx_gpu.h"   /* GPU vertex-cache fast path (0x56/0x54) entry points */
+#endif
+
+/* PROFILE=1 enables the detailed counters and UART report. Keep per-triangle
+ * timer reads out of the normal build: they contend with GPU bus traffic. */
+#if defined(TARGET_OPENFPGA) && SM64_PROFILE && !defined(TARGET_POCKET)
+#define TARGET_POCKET
+#endif
+
 #ifdef TARGET_POCKET
 extern int printf(const char *fmt, ...);   /* musl printf -> stdout (terminal/UART) */
+void gpu_ring_prof_get(unsigned *spins, unsigned *min_free);  /* gfx_gpu.c: GPU ring backpressure */
+void gpu_present_prof_get(unsigned *flip, unsigned *acq);      /* gfx_gpu.c: flip submit vs buffer-acquire wait */
+void gpu_vc_prof_get(unsigned *words, unsigned *ctris, unsigned *ltris,
+                     unsigned *loads);                          /* gfx_gpu.c: vertex-cache wire counters */
+#ifdef OF_PC
+/* Host desktop build (OF_PC): the 0x40000004 PROF MMIO counter is unmapped (it
+ * would segfault), so source the per-frame profiling brackets from the portable
+ * microsecond wall-clock instead. The PERF/OTHER lines are cosmetic. */
+#include "of_timer.h"
+#define PROF_TMR() ((uint32_t)of_time_us())
+#define PROF_HZ()  1000000u                 /* of_time_us: 1 tick = 1 us */
+#else
+#include "of_caps.h"
 #define PROF_TMR() (*(volatile uint32_t *)0x40000004)
+/* The 0x40000004 counter runs at the CPU clock, so take the rate from the caps
+ * descriptor rather than hardcoding it -- this build reports 90 MHz. */
+#define PROF_HZ()  (of_get_caps() && of_get_caps()->cpu_freq_hz \
+                        ? of_get_caps()->cpu_freq_hz : 90000000u)
+#endif
 static uint32_t prof_vtx, prof_mtx, prof_emit, prof_tex;  /* per-frame sub-dl cycle buckets */
 static uint32_t prof_tex_import;                 /* of prof_tex: import_texture (conversion) only */
+static uint32_t prof_prev_t0;                    /* prior frame's _t0, for true frame-to-frame fps */
+unsigned g_prof_audio;                           /* pc_main.c: audio pump ticks since the last rendered frame */
 static uint32_t g_flush_n, g_flush_sub, g_flush_tris;  /* flush calls / actual submits / tris submitted */
 static uint32_t g_fln_comb, g_fln_tex, g_fln_zst, g_fln_vp;  /* flushes forced, by state-change source */
 #endif
@@ -47,7 +75,18 @@ typedef float rspv_t;
 #define SUPPORT_CHECK(x) assert(x)
 
 // SCALE_M_N: upscale/downscale M-bit integer to N-bit
-#define SCALE_5_8(VAL_) (((VAL_) * 0xFF) / 0x1F)
+/* SCALE_5_8 was ((VAL_) * 0xFF) / 0x1F.  255/31 is not an integer, so (unlike
+ * SCALE_4_8/SCALE_3_8 below) the divide could not fold to a multiply, and the
+ * container toolchain (GCC 13.2) did NOT strength-reduce it either — it hoisted
+ * 31 into a register and emitted a real `div`.  On this VexiiRiscv rv32imafc
+ * core an integer divide is ~30+ cycles and non-pipelined, and the three RGBA16
+ * channel scalings below sit in the per-texel loop of import_texture_rgba16 /
+ * _ci8 / _ci4 (SM64's dominant texture formats) -> ~100 cycles/texel of pure
+ * divide, ~1 ms per 32x32 texture import.
+ *
+ * (VAL_ * 1053) >> 7 is BIT-IDENTICAL to (VAL_ * 255) / 31 for every 5-bit
+ * input 0..31 (brute-force verified); max product 31*1053 = 32643, no overflow. */
+#define SCALE_5_8(VAL_) (((VAL_) * 1053) >> 7)
 #define SCALE_8_5(VAL_) ((((VAL_) + 4) * 0x1F) / 0xFF)
 #define SCALE_4_8(VAL_) ((VAL_) * 0x11)
 #define SCALE_8_4(VAL_) ((VAL_) / 0x11)
@@ -62,6 +101,12 @@ typedef float rspv_t;
 #define MAX_BUFFERED 256
 #define MAX_LIGHTS 2
 #define MAX_VERTICES 64
+
+#ifdef TARGET_OPENFPGA
+#if GFX_VC_MAX_BUFFERED != MAX_BUFFERED
+#error "gfx_vc_true[] (gfx_gpu.h) must cover exactly MAX_BUFFERED buffered tris"
+#endif
+#endif
 
 // clip triangles for the software rasterizer in advance
 #define GFX_MANUAL_CLIPPING 1
@@ -83,7 +128,28 @@ typedef float rspv_t;
 #define GFX_COLOR_CONVERT(x) (x / 255.f)
 #endif
 
-#ifdef GFX_W_PREMULT
+/* GFX_W_PREMULT premultiplies the interpolated attributes (u, v, fog, colour
+ * inputs) by 1/w so a plain affine software rasterizer can interpolate them
+ * perspective-correctly and divide by the interpolated 1/w per pixel.
+ *
+ * The os30 GPU path does NOT want that.  It derives its own perspective planes
+ * from raw texels + 1/w in hardware, so gpu_draw_triangles() immediately
+ * recovered w = 1.0f/f[3] and multiplied every one of those attributes straight
+ * back out again -- a pure round trip costing an fdiv.s plus ~12 fmul.s PER
+ * VERTEX (and losing precision on the way).  fdiv.s is non-pipelined on this
+ * VexiiRiscv core, so those divides are not free.
+ *
+ * So on TARGET_OPENFPGA don't premultiply the attributes at all: emit them raw
+ * and let gpu_draw_triangles consume them directly.  x/y/z/1-over-w (emitted
+ * explicitly below, not via this macro) still carry 1/w -- the GPU genuinely
+ * needs NDC and 1/w.  ENABLE_SOFTRAST's rasterizer is not built into this core
+ * (PC_SRCS has no gfx_soft.c), so nothing is left that wants premultiplied
+ * attributes; the softras spelling is kept for a non-OPENFPGA build.
+ *
+ * NOTE: the two sides MUST agree.  If GFX_OUT_PROP ever premultiplies again,
+ * gpu_draw_triangles has to restore its `w` de-premultiply (and cc_val_rgb its
+ * `w` argument) or every colour and texcoord is scaled by 1/w. */
+#if defined(GFX_W_PREMULT) && !defined(TARGET_OPENFPGA)
     #define GFX_OUT_PROP(x) RSPV_MUL((x), w_inv)
 #else
 #define GFX_OUT_PROP(x) (x)
@@ -110,6 +176,14 @@ struct XYWidthHeight {
 
 struct LoadedVertex {
     rspv_t x, y, z, w;
+    /* 1/w, computed ONCE here rather than re-divided per triangle.  The N64's
+     * RSP transformed each vertex once and then referenced it by index from many
+     * triangles; this port has no GPU vertex cache (XFORM_RGB is clear on this
+     * bitstream), so triangles carry full vertices -- but the RECIPROCAL at least
+     * need not be recomputed.  It was being taken 3x in the backface test and
+     * another 3x in gfx_push_triangle, i.e. 6 non-pipelined fdiv.s per triangle
+     * for what is one divide per vertex.  Bit-identical: same w, same 1.0f/w. */
+    rspv_t w_inv;
     rspv_t u, v;
     struct RGBA color;
     uint8_t clip_rej;
@@ -119,6 +193,8 @@ struct TextureHashmapNode {
     struct TextureHashmapNode *next;
 
     const uint8_t *texture_addr;
+    const uint8_t *palette_addr;
+    uint32_t size_bytes, line_size_bytes;
     uint8_t fmt, siz;
 
     uint32_t texture_id;
@@ -139,11 +215,15 @@ static struct {
 static const uint8_t *s_tex_sig_addr[2];
 static uint8_t  s_tex_sig_fmt[2], s_tex_sig_siz[2];
 static uint32_t s_tex_sig_line[2];
+static uint32_t s_tex_sig_size[2];
+static const uint8_t *s_tex_sig_palette[2];
 
 struct ColorCombiner {
     uint32_t cc_id;
     struct ShaderProgram *prg;
     uint8_t shader_input_mapping[2][4];
+    uint8_t num_inputs;
+    bool used_textures[2];
 };
 
 static struct ColorCombiner color_combiner_pool[64];
@@ -155,12 +235,14 @@ static struct RSP {
 
     rspv_t MP_matrix[4][4];
     rspv_t P_matrix[4][4];
+    bool matrix_changed;
 
     Light_t current_lights[MAX_LIGHTS + 1];
     rspv_t current_lights_coeffs[MAX_LIGHTS][3];
     rspv_t current_lookat_coeffs[2][3]; // lookat_x, lookat_y
     uint8_t current_num_lights; // includes ambient light
     bool lights_changed;
+    bool lookat_changed;
 
     uint32_t geometry_mode;
     int16_t fog_mul, fog_offset;
@@ -208,6 +290,7 @@ static struct RenderingState {
     bool depth_mask;
     bool decal_mode;
     bool alpha_blend;
+    bool alpha_cvg_sel;
     struct XYWidthHeight viewport, scissor;
     struct ShaderProgram *shader_program;
     struct TextureHashmapNode *textures[2];
@@ -221,6 +304,14 @@ static float inv_ratio_y = 1.f;
 
 static bool dropped_frame;
 
+#ifdef OF_DBG_SHADE
+/* Bounded SHADE-color probe (PC build): print the per-vertex SHADE RGB for the
+ * G_CC_SHADE main-face combiner (1 color input, no texture) for the first few
+ * frames only, capped to a few hundred lines. Incremented in gfx_run(). */
+static int of_dbg_frame = -1;     /* -1 until first gfx_run() */
+static int of_dbg_lines = 0;
+#endif
+
 #ifdef TARGET_POCKET
 // Per-frame triangle diagnostic counters
 static struct {
@@ -233,6 +324,48 @@ static int vtx_dump_count;  // counts gfx_sp_vertex calls, dump first few
 static float buf_vbo[MAX_BUFFERED * (26 * 3)]; // 3 vertices in a triangle and 26 values per vtx
 static size_t buf_vbo_len;
 static size_t buf_vbo_num_tris;
+
+#ifdef TARGET_OPENFPGA
+/* GPU vertex-cache slot map: 1:1 rsp.loaded_vertices[i] <-> GPU slot i for
+ * i < 32 (F3DEX2 caps v0+n at 32, so the live G_VTX index range fits the
+ * 32-slot cache exactly; the rect scratch verts at 64-67 and clipper stack
+ * verts have no slot and fall back to 0x4E).  Bit i set = slot i STALE: the
+ * loaded vertex has not been uploaded (0x56) since it was last (re)written.
+ * Invalidated by G_VTX rewrites, frame start, and any texture-affecting
+ * state change (vc_tex_sig below).  Shade staleness across combiner changes
+ * remains accepted (0x4A rides at 0x54 draw time). */
+static uint32_t vc_slot_stale = 0xFFFFFFFFu;
+
+/* Texture-affecting signature of the last cached-path batch.  Slot s/t are
+ * TILE-RELATIVE, baked at UPLOAD time against the then-current tile origin
+ * and filter bias — and SETTILESIZE can move uls/ult WITHOUT any flush or
+ * re-import, so a slot uploaded under tile A and drawn under tile B samples
+ * garbage (the hardware A/B "glitchy textures").  When any field changes,
+ * every slot is wiped: re-uploads cost 8 words x <=32 slots per texture
+ * change, far below the cached path's savings.
+ * TODO(v2): a per-slot texture EPOCH (stamp each slot with the signature
+ * generation it was uploaded under) would confine re-uploads to the slots a
+ * new tile actually draws, instead of this global wipe. */
+static struct {
+    const uint8_t *addr;          /* imported texture (re-import/animation) */
+    uint32_t cc_id;               /* combiner id: slot rgb565 is a per-material
+                                   * FUNCTION of the vertex (white for texel-
+                                   * only/blend-texel-alpha cycles, shade/csel
+                                   * otherwise).  Same texture re-drawn under a
+                                   * different cc with no G_VTX between reuses
+                                   * slots whose baked shade obeys the OLD
+                                   * rules — white-baked slots in a modulate
+                                   * batch render unlit, shade-baked slots in a
+                                   * texel-only batch render DARK (the round-4
+                                   * "dark zones").  The 0x4A can't fix it: the
+                                   * shade lives IN the slot. */
+    uint16_t uls, ult;            /* tile origin (bakes into slot s/t) */
+    uint16_t scale_s, scale_t;    /* G_TEXTURE scale (bakes into v->u/v) */
+    uint8_t  textured;            /* textured vs white-texel batch */
+    uint8_t  bias;                /* filter half-texel bias */
+    uint8_t  cms, cmt;            /* clamp/mirror wrap mode */
+} vc_tex_sig;
+#endif
 
 static struct GfxWindowManagerAPI *gfx_wapi;
 static struct GfxRenderingAPI *gfx_rapi;
@@ -311,6 +444,7 @@ static void gfx_generate_cc(struct ColorCombiner *comb, uint32_t cc_id) {
     }
     comb->cc_id = cc_id;
     comb->prg = gfx_lookup_or_create_shader_program(shader_id);
+    gfx_rapi->shader_get_info(comb->prg, &comb->num_inputs, comb->used_textures);
     memcpy(comb->shader_input_mapping, shader_input_mapping, sizeof(shader_input_mapping));
 }
 
@@ -326,17 +460,23 @@ static struct ColorCombiner *gfx_lookup_or_create_color_combiner(uint32_t cc_id)
         }
     }
     gfx_flush();
+    if (color_combiner_pool_size == sizeof(color_combiner_pool) / sizeof(color_combiner_pool[0]))
+        color_combiner_pool_size = 0;
     struct ColorCombiner *comb = &color_combiner_pool[color_combiner_pool_size++];
     gfx_generate_cc(comb, cc_id);
     return prev_combiner = comb;
 }
 
 static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, const uint8_t *orig_addr, uint32_t fmt, uint32_t siz) {
+    const uint8_t *palette = fmt == G_IM_FMT_CI ? rdp.palette : NULL;
     size_t hash = (uintptr_t)orig_addr;
     hash = (hash >> 5) & 0x3ff;
     struct TextureHashmapNode **node = &gfx_texture_cache.hashmap[hash];
     while (*node != NULL && *node - gfx_texture_cache.pool < (int)gfx_texture_cache.pool_pos) {
-        if ((*node)->texture_addr == orig_addr && (*node)->fmt == fmt && (*node)->siz == siz) {
+        if ((*node)->texture_addr == orig_addr && (*node)->fmt == fmt && (*node)->siz == siz
+            && (*node)->palette_addr == palette
+            && (*node)->size_bytes == rdp.loaded_texture[tile].size_bytes
+            && (*node)->line_size_bytes == rdp.texture_tile.line_size_bytes) {
             gfx_rapi->select_texture(tile, (*node)->texture_id);
             *n = *node;
             return true;
@@ -346,6 +486,9 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
     if (gfx_texture_cache.pool_pos == sizeof(gfx_texture_cache.pool) / sizeof(struct TextureHashmapNode)) {
         // Pool is full. We just invalidate everything and start over.
         gfx_texture_cache.pool_pos = 0;
+        /* Old bucket heads can point at slots reused by a different bucket.
+         * Clear them before those slots become live again. */
+        memset(gfx_texture_cache.hashmap, 0, sizeof(gfx_texture_cache.hashmap));
         node = &gfx_texture_cache.hashmap[hash];
         s_tex_sig_addr[0] = s_tex_sig_addr[1] = NULL;  /* recycled GTex -> force re-import */
         //puts("Clearing texture cache");
@@ -361,6 +504,9 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
     (*node)->linear_filter = false;
     (*node)->next = NULL;
     (*node)->texture_addr = orig_addr;
+    (*node)->palette_addr = palette;
+    (*node)->size_bytes = rdp.loaded_texture[tile].size_bytes;
+    (*node)->line_size_bytes = rdp.texture_tile.line_size_bytes;
     (*node)->fmt = fmt;
     (*node)->siz = siz;
     *n = *node;
@@ -368,6 +514,19 @@ static bool gfx_texture_cache_lookup(int tile, struct TextureHashmapNode **n, co
 }
 
 static void import_texture_rgba16(int tile) {
+    uint32_t width = rdp.texture_tile.line_size_bytes / 2;
+    uint32_t height = rdp.loaded_texture[tile].size_bytes / rdp.texture_tile.line_size_bytes;
+
+    /* Fast path: hand the ROM texels to the backend as-is.  RGBA16 is SM64's
+     * dominant texture format and the expansion below is pure waste for a
+     * 16-bit-native backend — see upload_texture_rgba16 in gfx_rendering_api.h.
+     * Falls through to the generic path when the backend declines (or has no
+     * such entry point), so behaviour is unchanged everywhere else. */
+    if (gfx_rapi->upload_texture_rgba16 &&
+        gfx_rapi->upload_texture_rgba16(rdp.loaded_texture[tile].addr,
+                                        (int)width, (int)height))
+        return;
+
     uint8_t rgba32_buf[8192];
 
     for (uint32_t i = 0; i < rdp.loaded_texture[tile].size_bytes / 2; i++) {
@@ -381,9 +540,6 @@ static void import_texture_rgba16(int tile) {
         rgba32_buf[4*i + 2] = SCALE_5_8(b);
         rgba32_buf[4*i + 3] = a ? 255 : 0;
     }
-
-    uint32_t width = rdp.texture_tile.line_size_bytes / 2;
-    uint32_t height = rdp.loaded_texture[tile].size_bytes / rdp.texture_tile.line_size_bytes;
 
     gfx_rapi->upload_texture(rgba32_buf, width, height);
 }
@@ -594,7 +750,9 @@ static void import_texture(int tile) {
     }
 }
 
-static inline float rsqrtf(const float x) {
+/* Renamed from rsqrtf to of_rsqrtf: recent glibc <math.h> declares its own
+ * non-static rsqrtf, which collides with this file-local fast-inverse-sqrt. */
+static inline float of_rsqrtf(const float x) {
     const float x2 = x * 0.5f;
     float y = x;
     int32_t i = *(int32_t *)&y;
@@ -605,7 +763,7 @@ static inline float rsqrtf(const float x) {
 }
 
 static inline void gfx_normalize_vector(float v[3]) {
-    const float s = rsqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    const float s = of_rsqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
     v[0] *= s;
     v[1] *= s;
     v[2] *= s;
@@ -695,8 +853,11 @@ static void gfx_sp_matrix(uint8_t parameters, const int32_t *addr) {
             gfx_matrix_mul_inplace(matrix, rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1]);
         }
         rsp.lights_changed = 1;
+        rsp.lookat_changed = true;
     }
-    gfx_matrix_mul(rsp.MP_matrix, rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1], rsp.P_matrix);
+    /* Several matrix commands can precede the next vertex load. Only its
+     * final modelview/projection pair needs a product. */
+    rsp.matrix_changed = true;
 #ifdef TARGET_POCKET
     prof_mtx += PROF_TMR() - _pm;
 #endif
@@ -706,13 +867,13 @@ static void gfx_sp_pop_matrix(uint32_t count) {
 #ifdef TARGET_POCKET
     uint32_t _pm = PROF_TMR();
 #endif
-    while (count--) {
-        if (rsp.modelview_matrix_stack_size > 0) {
-            --rsp.modelview_matrix_stack_size;
-            if (rsp.modelview_matrix_stack_size > 0) {
-                gfx_matrix_mul(rsp.MP_matrix, rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1], rsp.P_matrix);
-            }
-        }
+    if (count && rsp.modelview_matrix_stack_size > 1) {
+        uint32_t available = rsp.modelview_matrix_stack_size - 1;
+        if (count > available) count = available;
+        rsp.modelview_matrix_stack_size -= count;
+        rsp.matrix_changed = true;
+        rsp.lights_changed = true;
+        rsp.lookat_changed = true;
     }
 #ifdef TARGET_POCKET
     prof_mtx += PROF_TMR() - _pm;
@@ -726,6 +887,37 @@ static inline float gfx_adjust_x_for_aspect_ratio(float x) {
 static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *vertices) {
 #ifdef TARGET_POCKET
     uint32_t _pv = PROF_TMR();
+#endif
+    if (n_vertices == 0)
+        return;
+    if (rsp.matrix_changed) {
+        gfx_matrix_mul(rsp.MP_matrix,
+                       rsp.modelview_matrix_stack[rsp.modelview_matrix_stack_size - 1],
+                       rsp.P_matrix);
+        rsp.matrix_changed = false;
+    }
+    if (rsp.geometry_mode & G_LIGHTING) {
+        if (rsp.lights_changed) {
+            for (int i = 0; i < rsp.current_num_lights - 1; i++)
+                calculate_normal_dir(&rsp.current_lights[i], rsp.current_lights_coeffs[i]);
+            rsp.lights_changed = false;
+        }
+        if ((rsp.geometry_mode & G_TEXTURE_GEN) && rsp.lookat_changed) {
+            static const Light_t lookat_x = {{0, 0, 0}, 0, {0, 0, 0}, 0, {127, 0, 0}, 0};
+            static const Light_t lookat_y = {{0, 0, 0}, 0, {0, 0, 0}, 0, {0, 127, 0}, 0};
+            calculate_normal_dir(&lookat_x, rsp.current_lookat_coeffs[0]);
+            calculate_normal_dir(&lookat_y, rsp.current_lookat_coeffs[1]);
+            rsp.lookat_changed = false;
+        }
+    }
+#ifdef TARGET_OPENFPGA
+    /* G_VTX rewrites these slots: their GPU cache copies (if any) go stale.
+     * (Captured before the loop below advances dest_index.) */
+    if (dest_index < 32) {
+        size_t n = n_vertices;
+        if (n > 32 - dest_index) n = 32 - dest_index;
+        vc_slot_stale |= (n >= 32 ? 0xFFFFFFFFu : ((1u << n) - 1u)) << dest_index;
+    }
 #endif
     // Hoist the loop-invariant MVP matrix into locals: d = &rsp.loaded_vertices[]
     // points *into* the rsp struct, so under -fno-strict-aliasing the per-vertex
@@ -753,27 +945,36 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         short V = v->tc[1] * rsp.texture_scaling_factor.t >> 16;
 
         if (rsp.geometry_mode & G_LIGHTING) {
-            if (rsp.lights_changed) {
-                for (int i = 0; i < rsp.current_num_lights - 1; i++) {
-                    calculate_normal_dir(&rsp.current_lights[i], rsp.current_lights_coeffs[i]);
-                }
-                static const Light_t lookat_x = {{0, 0, 0}, 0, {0, 0, 0}, 0, {127, 0, 0}, 0};
-                static const Light_t lookat_y = {{0, 0, 0}, 0, {0, 0, 0}, 0, {0, 127, 0}, 0};
-                calculate_normal_dir(&lookat_x, rsp.current_lookat_coeffs[0]);
-                calculate_normal_dir(&lookat_y, rsp.current_lookat_coeffs[1]);
-                rsp.lights_changed = false;
-            }
-
             int r = rsp.current_lights[rsp.current_num_lights - 1].col[0];
             int g = rsp.current_lights[rsp.current_num_lights - 1].col[1];
             int b = rsp.current_lights[rsp.current_num_lights - 1].col[2];
 
+#ifdef OF_DBG_FACE
+            /* OF_DBG_FACE probe: detect the beige Mario-skin diffuse light
+             * (col ~ (254,193,121)) and record its n.coeffs/127 intensity, so
+             * we can tell whether the face's SHADE is a BRIGHT diffuse result
+             * or only the DARK ambient term. Bounded by of_face_lines. */
+            int   of_face_hit = 0;
+            float of_face_int = 0.0f;
+#endif
             for (int i = 0; i < rsp.current_num_lights - 1; i++) {
                 float intensity = 0;
                 intensity += vn->n[0] * RSPV_TO_FLOAT(rsp.current_lights_coeffs[i][0]);
                 intensity += vn->n[1] * RSPV_TO_FLOAT(rsp.current_lights_coeffs[i][1]);
                 intensity += vn->n[2] * RSPV_TO_FLOAT(rsp.current_lights_coeffs[i][2]);
                 intensity /= 127.0f;
+#ifdef OF_DBG_FACE
+                {
+                    int lr = rsp.current_lights[i].col[0];
+                    int lg = rsp.current_lights[i].col[1];
+                    int lb = rsp.current_lights[i].col[2];
+                    if (lr > 240 && lg >= 180 && lg <= 210 &&
+                        lb >= 110 && lb <= 130) {
+                        of_face_hit = 1;
+                        of_face_int = intensity;
+                    }
+                }
+#endif
                 if (intensity > 0.0f) {
                     r += intensity * rsp.current_lights[i].col[0];
                     g += intensity * rsp.current_lights[i].col[1];
@@ -784,6 +985,23 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
             d->color.r = r < 0 ? 0 : r > 255 ? 255 : r;
             d->color.g = g < 0 ? 0 : g > 255 ? 255 : g;
             d->color.b = b < 0 ? 0 : b > 255 ? 255 : b;
+#ifdef OF_DBG_FACE
+            if (of_face_hit) {
+                static int of_face_lines = 0;
+                if (of_face_lines < 100) {
+                    of_face_lines++;
+                    int amb_r = rsp.current_lights[rsp.current_num_lights - 1].col[0];
+                    int amb_g = rsp.current_lights[rsp.current_num_lights - 1].col[1];
+                    int amb_b = rsp.current_lights[rsp.current_num_lights - 1].col[2];
+                    printf("OF_DBG_FACE: intensity=%.4f  amb=(%d,%d,%d)  "
+                           "shade=(%d,%d,%d)  %s\n",
+                           of_face_int, amb_r, amb_g, amb_b,
+                           d->color.r, d->color.g, d->color.b,
+                           of_face_int > 0.0f ? "BRIGHT(diffuse)" : "DARK(ambient-only)");
+                    fflush(stdout);
+                }
+            }
+#endif
 
             if (rsp.geometry_mode & G_TEXTURE_GEN) {
                 float dotx = 0, doty = 0;
@@ -819,11 +1037,12 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         d->y = y;
         d->z = z;
         d->w = w;
+        d->w_inv = RSPV_RCP(w);
 
         if (configEnableFog && (rsp.geometry_mode & G_FOG)) {
             float wf = w;
             float zf = z;
-            float winv = (wf == 0.f) ? 1.f / 0.001f : 1.f / wf;
+            float winv = (wf == 0.f) ? 1.f / 0.001f : d->w_inv;
             if (winv < 0.0f) winv = 32767.0f;
             float fog_z = zf * winv * rsp.fog_mul + rsp.fog_offset;
             int fog_i = (int)fog_z;
@@ -877,6 +1096,17 @@ static inline struct ColorCombiner *gfx_pick_combiner(bool *out_use_fog, bool *o
         gfx_rapi->set_use_alpha(use_alpha);
         rendering_state.alpha_blend = use_alpha;
     }
+    /* ALPHA_CVG_SEL is independent of use_alpha (see gfx_rendering_api.h): an
+     * opaque surface sets it yet reports use_alpha false, so a backend that
+     * discards transparent texels by value has to be told separately. */
+    if (gfx_rapi->set_alpha_cvg_sel != NULL) {
+        const bool alpha_cvg_sel = (rdp.other_mode_l & ALPHA_CVG_SEL) == ALPHA_CVG_SEL;
+        if (alpha_cvg_sel != rendering_state.alpha_cvg_sel) {
+            gfx_flush();
+            gfx_rapi->set_alpha_cvg_sel(alpha_cvg_sel);
+            rendering_state.alpha_cvg_sel = alpha_cvg_sel;
+        }
+    }
 
     if (out_use_fog) *out_use_fog = use_fog;
     if (out_use_alpha) *out_use_alpha = use_alpha;
@@ -895,8 +1125,11 @@ static inline bool gfx_update_textures(const bool used_textures[2], const bool l
                 const uint8_t *taddr = rdp.loaded_texture[i].addr;
                 uint8_t  tfmt = rdp.texture_tile.fmt, tsiz = rdp.texture_tile.siz;
                 uint32_t tline = rdp.texture_tile.line_size_bytes;
+                uint32_t tsize = rdp.loaded_texture[i].size_bytes;
+                const uint8_t *tpalette = tfmt == G_IM_FMT_CI ? rdp.palette : NULL;
                 if (taddr != s_tex_sig_addr[i] || tfmt != s_tex_sig_fmt[i]
-                    || tsiz != s_tex_sig_siz[i] || tline != s_tex_sig_line[i]) {
+                    || tsiz != s_tex_sig_siz[i] || tline != s_tex_sig_line[i]
+                    || tsize != s_tex_sig_size[i] || tpalette != s_tex_sig_palette[i]) {
 #ifdef TARGET_POCKET
                     g_fln_tex++;
 #endif
@@ -910,6 +1143,7 @@ static inline bool gfx_update_textures(const bool used_textures[2], const bool l
 #endif
                     s_tex_sig_addr[i] = taddr; s_tex_sig_fmt[i] = tfmt;
                     s_tex_sig_siz[i]  = tsiz;  s_tex_sig_line[i] = tline;
+                    s_tex_sig_size[i] = tsize; s_tex_sig_palette[i] = tpalette;
                 }
                 rdp.textures_changed[i] = false;
             }
@@ -927,6 +1161,202 @@ static inline bool gfx_update_textures(const bool used_textures[2], const bool l
     }
     return used_textures[0] || used_textures[1];
 }
+
+#ifdef TARGET_OPENFPGA
+/* Resolve one combiner colour input for a vertex, mirroring the buf_vbo fill
+ * switch in gfx_push_triangle (PRIM/SHADE/ENV/LOD; the LOD distance comes
+ * from the triangle's FIRST vertex, exactly like the legacy path). */
+static inline const struct RGBA *gfx_vc_resolve(uint8_t ccmux,
+                                                const struct LoadedVertex *v,
+                                                const struct LoadedVertex *v1,
+                                                struct RGBA *tmp) {
+    switch (ccmux) {
+        case CC_PRIM:  return &rdp.prim_color;
+        case CC_SHADE: return &v->color;
+        case CC_ENV:   return &rdp.env_color;
+        case CC_LOD: {
+            float distance_frac = (RSPV_TO_FLOAT(v1->w) - 3000.0f) / 3000.0f;
+            if (distance_frac < 0.0f) distance_frac = 0.0f;
+            if (distance_frac > 1.0f) distance_frac = 1.0f;
+            tmp->r = tmp->g = tmp->b = tmp->a = distance_frac * 255.0f;
+            return tmp;
+        }
+        default:
+            memset(tmp, 0, sizeof(*tmp));
+            return tmp;
+    }
+}
+
+/* GPU vertex-cache fast path: try to draw this triangle as a 1-word 0x54
+ * against the resident G_VTX slots, first uploading any stale slot via 0x56
+ * (clip x/y/w + the s/t and rgb565 the 0x4E path would have computed).
+ * Returns 1 when emitted; 0 -> caller uses the flattened buf_vbo/0x4E path.
+ * Per-tri requirements on top of the backend's material eligibility (caps
+ * bit 29, truecolor, not HILITE/cd, not decal, not blend/XLU): all 3 verts
+ * must live in rsp.loaded_vertices[0..31] (clipper-manufactured and rect
+ * scratch verts fail the address-range test) and w must fit Q16.16 (the
+ * backend applies a further 1/256 pre-scale, so 32767 is conservative). */
+static int gfx_vc_try_push(const struct LoadedVertex *v1,
+                           const struct LoadedVertex *v2,
+                           const struct LoadedVertex *v3,
+                           const struct ColorCombiner *comb, bool use_fog) {
+    int rgb_in, alpha_in;
+    const int elig = gfx_gpu_vtx_cache_begin(&rgb_in, &alpha_in);
+    const struct LoadedVertex *v_arr[3] = {v1, v2, v3};
+    if (!elig)
+        goto per_tri_fallback;
+    uint8_t slot[3];
+    unsigned dirty = 0;
+    float w_first = 0.0f;
+    int   w_uniform = 1;
+    for (int i = 0; i < 3; i++) {
+        /* Clipped vertices can live on the stack. Subtracting unrelated
+         * pointers is undefined; range-check byte addresses first. */
+        const uintptr_t offset = (uintptr_t)v_arr[i] - (uintptr_t)rsp.loaded_vertices;
+        if (offset >= 32 * sizeof(struct LoadedVertex))
+            goto per_tri_fallback;          /* no stable slot */
+        const size_t idx = offset / sizeof(struct LoadedVertex);
+        const float w = RSPV_TO_FLOAT(v_arr[i]->w);
+        if (!(w > 0.0f && w < 32767.0f))
+            goto per_tri_fallback;          /* Q16.16 w overflow guard */
+        if (i == 0) w_first = w;
+        else if (w != w_first) w_uniform = 0;
+        slot[i] = (uint8_t)idx;
+        if (vc_slot_stale & (1u << idx))
+            dirty |= 1u << i;
+    }
+
+    /* ORTHOGRAPHIC TRIANGLES MUST NOT RIDE THE CACHE.
+     *
+     * The cached path ships clip-space x/y/w (struct gfx_vc_vtx) and lets the
+     * GPU do the divide and derive its planes from the 1/w gradients.  An ortho
+     * projection has a zero fourth column -- segment2.c's matrix_fullscreen is
+     * m03=m13=m23=0, m33=1 -- so gfx_sp_vertex's
+     *     w = ox*m03 + oy*m13 + oz*m23 + m33
+     * yields exactly 1.0 for every vertex.  Constant w means d(1/w)/dx and
+     * d(1/w)/dy are both zero, the derive has no gradient to work from, and the
+     * triangle collapses: the intro's "(c) 1996 Nintendo" strip rendered as a
+     * line.  (It only showed up there because HUD/menu rects reach the GPU via
+     * gfx_draw_rectangle, whose scratch verts already fail the loaded_vertices
+     * address test above -- the intro strip is loaded by a real gsSPVertex and
+     * is the rare 2D draw that gets this far.)
+     *
+     * The flattened 0x4E path projects on the CPU and sends screen-space
+     * coordinates plus an explicit zi, so it has no such degeneracy.  Exact
+     * float equality is the right test: these w's are all literally m33, while
+     * three bit-identical w's in perspective geometry effectively never happen,
+     * so this costs no measurable cached-triangle throughput. */
+    if (w_uniform)
+        goto per_tri_fallback;
+
+    /* Surface alpha: the legacy path takes the csel input's ALPHA-cycle value
+     * of the batch's first vertex (with fog, shade alpha carries the fog
+     * intensity, so it reads as opaque — same exception as the fill loop). */
+    uint8_t surf_a = 255;
+    if (alpha_in >= 0) {
+        struct RGBA tmpa;
+        const struct RGBA *ac =
+            gfx_vc_resolve(comb->shader_input_mapping[1][alpha_in], v1, v1, &tmpa);
+        surf_a = (use_fog && ac == &v1->color) ? 255 : ac->a;
+    }
+
+    struct gfx_vc_vtx vc[3];
+    const int   textured = elig & GFX_VC_TEXTURED;
+    const float uofs = textured ? (float)(rdp.texture_tile.uls * 8) : 0.0f;
+    const float vofs = textured ? (float)(rdp.texture_tile.ult * 8) : 0.0f;
+    const float bias = (textured &&
+                        (rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT)
+                       ? 0.5f : 0.0f;
+
+    /* Texture-affecting state changed since the last cached batch?  Wipe
+     * ALL slots — their baked s/t are relative to the OLD tile (see the
+     * vc_tex_sig note; uls/ult moves arrive with no flush at all, so the
+     * material dirty flag alone does not cover this). */
+    {
+        const uint8_t *taddr = textured ? rdp.loaded_texture[0].addr : NULL;
+        const uint8_t  tbias = bias != 0.0f;
+        if (taddr != vc_tex_sig.addr ||
+            comb->cc_id != vc_tex_sig.cc_id ||
+            rdp.texture_tile.uls != vc_tex_sig.uls ||
+            rdp.texture_tile.ult != vc_tex_sig.ult ||
+            rsp.texture_scaling_factor.s != vc_tex_sig.scale_s ||
+            rsp.texture_scaling_factor.t != vc_tex_sig.scale_t ||
+            (uint8_t)(textured != 0) != vc_tex_sig.textured ||
+            tbias != vc_tex_sig.bias ||
+            rdp.texture_tile.cms != vc_tex_sig.cms ||
+            rdp.texture_tile.cmt != vc_tex_sig.cmt) {
+            vc_slot_stale = 0xFFFFFFFFu;
+            vc_tex_sig.addr     = taddr;
+            vc_tex_sig.cc_id    = comb->cc_id;
+            vc_tex_sig.uls      = rdp.texture_tile.uls;
+            vc_tex_sig.ult      = rdp.texture_tile.ult;
+            vc_tex_sig.scale_s  = rsp.texture_scaling_factor.s;
+            vc_tex_sig.scale_t  = rsp.texture_scaling_factor.t;
+            vc_tex_sig.textured = (uint8_t)(textured != 0);
+            vc_tex_sig.bias     = tbias;
+            vc_tex_sig.cms      = rdp.texture_tile.cms;
+            vc_tex_sig.cmt      = rdp.texture_tile.cmt;
+            /* dirty bits were computed above from the pre-wipe map: redo */
+            dirty = 7u;
+        }
+    }
+
+    /* LOD shade is derived from the first vertex of each triangle, so it
+     * cannot be reused as a property of a shared GPU slot. */
+    if (rgb_in >= 0 && comb->shader_input_mapping[0][rgb_in] == CC_LOD)
+        dirty = 7u;
+    vc[0].a = surf_a;
+    for (int i = 0; i < 3; i++) {
+        if (!(dirty & (1u << i)))
+            continue;
+        const struct LoadedVertex *v = v_arr[i];
+        vc[i].cx = RSPV_TO_FLOAT(v->x);
+        vc[i].cy = RSPV_TO_FLOAT(v->y);
+        vc[i].cw = RSPV_TO_FLOAT(v->w);
+        vc[i].w_inv = RSPV_TO_FLOAT(v->w_inv);
+        if (textured) {
+            vc[i].u = (RSPV_TO_FLOAT(v->u) - uofs) / 32.0f + bias;
+            vc[i].v = (RSPV_TO_FLOAT(v->v) - vofs) / 32.0f + bias;
+        } else {
+            vc[i].u = vc[i].v = 0.0f;       /* untextured truecolor: s=t=0 */
+        }
+        if (rgb_in >= 0) {
+            struct RGBA tmpc;
+            const struct RGBA *c =
+                gfx_vc_resolve(comb->shader_input_mapping[0][rgb_in], v, v1, &tmpc);
+            vc[i].r = c->r; vc[i].g = c->g; vc[i].b = c->b;
+        } else {
+            vc[i].r = vc[i].g = vc[i].b = 255;  /* backend sends 0xFFFF anyway */
+        }
+        vc[i].a = surf_a;
+    }
+
+    /* Ring draw order: buffered 0x4E triangles must land before this one
+     * (rare — only when clipped-fan fallbacks interleave with cached tris
+     * inside one material batch). */
+    if (buf_vbo_len > 0)
+        gfx_flush();
+
+    gfx_gpu_vtx_cache_tri(vc, slot, dirty);
+    if (dirty & 1u) vc_slot_stale &= ~(1u << slot[0]);
+    if (dirty & 2u) vc_slot_stale &= ~(1u << slot[1]);
+    if (dirty & 4u) vc_slot_stale &= ~(1u << slot[2]);
+    return 1;
+
+per_tri_fallback:
+    /* Preserve original coordinates even when a whole material falls back. */
+    if (buf_vbo_num_tris < GFX_VC_MAX_BUFFERED) {
+        struct gfx_vc_true_xyw *tv = &gfx_vc_true[buf_vbo_num_tris];
+        for (int i = 0; i < 3; i++) {
+            tv->x[i] = RSPV_TO_FLOAT(v_arr[i]->x);
+            tv->y[i] = RSPV_TO_FLOAT(v_arr[i]->y);
+            tv->w[i] = RSPV_TO_FLOAT(v_arr[i]->w);
+        }
+        tv->valid = 1;
+    }
+    return 0;
+}
+#endif /* TARGET_OPENFPGA */
 
 static inline void gfx_push_triangle(const struct LoadedVertex *restrict v1, const struct LoadedVertex *restrict v2, const struct LoadedVertex *restrict v3) {
     const struct LoadedVertex *v_arr[3] = {v1, v2, v3};
@@ -981,11 +1411,11 @@ static inline void gfx_push_triangle(const struct LoadedVertex *restrict v1, con
         rdp.viewport_or_scissor_changed = false;
     }
 
-    uint8_t num_inputs;
-    bool used_textures[2], use_fog, use_alpha;
+    bool use_fog, use_alpha;
 
     struct ColorCombiner *comb = gfx_pick_combiner(&use_fog, &use_alpha);
-    gfx_rapi->shader_get_info(rendering_state.shader_program, &num_inputs, used_textures);
+    const uint8_t num_inputs = comb->num_inputs;
+    const bool *used_textures = comb->used_textures;
 
     const bool linear_filter = configFiltering && (rdp.other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT;
 #ifdef TARGET_POCKET
@@ -995,7 +1425,31 @@ static inline void gfx_push_triangle(const struct LoadedVertex *restrict v1, con
 #ifdef TARGET_POCKET
     prof_tex += PROF_TMR() - _pt;
 #endif
-#ifndef TARGET_OPENFPGA
+
+#ifdef OF_DBG_SHADE
+    /* G_CC_SHADE main face: exactly one color input, no texture, and that input
+     * is SHADE (per-vertex color). Print the 3 vertices' SHADE RGB. Bounded to
+     * frames 0..2 and ~400 lines so the title-screen head is fully captured but
+     * output stays small. */
+    if (of_dbg_frame >= 0 && of_dbg_frame < 3 && of_dbg_lines < 400 &&
+        num_inputs == 1 && !use_texture &&
+        comb->shader_input_mapping[0][0] == CC_SHADE) {
+        fprintf(stderr,
+            "SHADE f%d v0=(%3u,%3u,%3u) v1=(%3u,%3u,%3u) v2=(%3u,%3u,%3u)\n",
+            of_dbg_frame,
+            v_arr[0]->color.r, v_arr[0]->color.g, v_arr[0]->color.b,
+            v_arr[1]->color.r, v_arr[1]->color.g, v_arr[1]->color.b,
+            v_arr[2]->color.r, v_arr[2]->color.g, v_arr[2]->color.b);
+        of_dbg_lines++;
+    }
+#endif
+#ifdef TARGET_OPENFPGA
+    /* GPU vertex-cache fast path: G_VTX-resident verts upload once (0x56),
+     * the triangle goes out as a 1-word 0x54.  Falls through to the flattened
+     * buf_vbo/0x4E path when the material or the verts are ineligible. */
+    if (gfx_vc_try_push(v1, v2, v3, comb, use_fog))
+        return;
+#else
     /* Tile-rect dims used to NORMALIZE texels to [0,1] for the desktop softras.
      * The GPU path (TARGET_OPENFPGA) emits RAW texels instead — see below. */
     const uint32_t tex_width = (rdp.texture_tile.lrs - rdp.texture_tile.uls + 4) / 4;
@@ -1009,7 +1463,7 @@ static inline void gfx_push_triangle(const struct LoadedVertex *restrict v1, con
     for (int i = 0; i < 3; i++) {
 #ifdef GFX_W_PREMULT
         const rspv_t w = v_arr[i]->w;
-        const rspv_t w_inv = RSPV_RCP(w);
+        const rspv_t w_inv = v_arr[i]->w_inv;   /* cached per vertex, not per triangle */
         buf_vbo[buf_vbo_len++] = RSPV_MUL(v_arr[i]->x, w_inv);
         buf_vbo[buf_vbo_len++] = RSPV_MUL(v_arr[i]->y, w_inv);
         buf_vbo[buf_vbo_len++] = RSPV_MUL(v_arr[i]->z + w, RSPV_MUL(RSPV_HALF, w_inv));
@@ -1170,6 +1624,7 @@ static inline bool gfx_clip_triangle(struct LoadedVertex *v1, struct LoadedVerte
                     xv->u = rspv_lerp(vthis->u, vnext->u, t);
                     xv->v = rspv_lerp(vthis->v, vnext->v, t);
                     xv->color = rgba_lerp(vthis->color, vnext->color, t);
+                    xv->w_inv = RSPV_RCP(xv->w);   /* w was just interpolated */
                     xv->clip_rej = 0;
                 } else {
                     const rspv_t t = RSPV_DIV(d2, d2 - d1);
@@ -1180,6 +1635,7 @@ static inline bool gfx_clip_triangle(struct LoadedVertex *v1, struct LoadedVerte
                     xv->u = rspv_lerp(vnext->u, vthis->u, t);
                     xv->v = rspv_lerp(vnext->v, vthis->v, t);
                     xv->color = rgba_lerp(vnext->color, vthis->color, t);
+                    xv->w_inv = RSPV_RCP(xv->w);   /* w was just interpolated */
                 }
             }
         }
@@ -1217,9 +1673,9 @@ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
     }
 
     if ((rsp.geometry_mode & G_CULL_BOTH) != 0) {
-        rspv_t w1_inv = RSPV_RCP(v1->w);
-        rspv_t w2_inv = RSPV_RCP(v2->w);
-        rspv_t w3_inv = RSPV_RCP(v3->w);
+        rspv_t w1_inv = v1->w_inv;   /* cached in gfx_sp_vertex / the clipper */
+        rspv_t w2_inv = v2->w_inv;
+        rspv_t w3_inv = v3->w_inv;
         rspv_t dx1 = RSPV_MUL(v1->x, w1_inv) - RSPV_MUL(v2->x, w2_inv);
         rspv_t dy1 = RSPV_MUL(v1->y, w1_inv) - RSPV_MUL(v2->y, w2_inv);
         rspv_t dx2 = RSPV_MUL(v3->x, w3_inv) - RSPV_MUL(v2->x, w2_inv);
@@ -1317,6 +1773,7 @@ static void gfx_sp_movemem(uint8_t index, uint8_t offset, const void* data) {
             if (lightidx >= 0 && lightidx <= MAX_LIGHTS) { // skip lookat
                 // NOTE: reads out of bounds if it is an ambient light
                 memcpy(rsp.current_lights + lightidx, data, sizeof(Light_t));
+                rsp.lights_changed = true;
             }
             break;
         }
@@ -1326,6 +1783,7 @@ static void gfx_sp_movemem(uint8_t index, uint8_t offset, const void* data) {
         case G_MV_L2:
             // NOTE: reads out of bounds if it is an ambient light
             memcpy(rsp.current_lights + (index - G_MV_L0) / 2, data, sizeof(Light_t));
+            rsp.lights_changed = true;
             break;
 #endif
     }
@@ -1406,6 +1864,7 @@ static void gfx_dp_load_tlut(uint8_t tile, uint32_t high_index) {
     SUPPORT_CHECK(tile == G_TX_LOADTILE);
     SUPPORT_CHECK(rdp.texture_to_load.siz == G_IM_SIZ_16b);
     rdp.palette = rdp.texture_to_load.addr;
+    rdp.textures_changed[0] = rdp.textures_changed[1] = true;
 }
 
 static void gfx_dp_load_block(uint8_t tile, uint32_t uls, uint32_t ult, uint32_t lrs, uint32_t dxt) {
@@ -1507,6 +1966,10 @@ static void gfx_dp_set_combine_mode(uint32_t rgb, uint32_t alpha) {
 }
 
 static void gfx_dp_set_env_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+#ifdef TARGET_OPENFPGA
+    if (rdp.env_color.r != r || rdp.env_color.g != g || rdp.env_color.b != b)
+        vc_slot_stale = 0xFFFFFFFFu;
+#endif
     rdp.env_color.r = r;
     rdp.env_color.g = g;
     rdp.env_color.b = b;
@@ -1514,6 +1977,10 @@ static void gfx_dp_set_env_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
 }
 
 static void gfx_dp_set_prim_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+#ifdef TARGET_OPENFPGA
+    if (rdp.prim_color.r != r || rdp.prim_color.g != g || rdp.prim_color.b != b)
+        vc_slot_stale = 0xFFFFFFFFu;
+#endif
     rdp.prim_color.r = r;
     rdp.prim_color.g = g;
     rdp.prim_color.b = b;
@@ -1570,6 +2037,13 @@ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lr
     ll->x = ulxf; ll->y = lryf; ll->z = -1.0f; ll->w = 1.0f;
     lr->x = lrxf; lr->y = lryf; lr->z = -1.0f; lr->w = 1.0f;
     ur->x = lrxf; ur->y = ulyf; ur->z = -1.0f; ur->w = 1.0f;
+
+    // These vertices bypass the ordinary vertex loader. Initialize its cached
+    // reciprocal and clip state too, so HUD rectangles retain valid depth/UVs.
+    for (int i = MAX_VERTICES; i < MAX_VERTICES + 4; i++) {
+        rsp.loaded_vertices[i].w_inv = 1.0f;
+        rsp.loaded_vertices[i].clip_rej = 0;
+    }
 
     // The coordinates for texture rectangle shall bypass the viewport setting
     struct XYWidthHeight default_viewport = {0, 0, gfx_current_dimensions.width, gfx_current_dimensions.height};
@@ -1678,6 +2152,8 @@ static void gfx_dp_fill_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t
     gfx_dp_set_combine_mode(color_comb(0, 0, 0, G_CCMUX_SHADE), color_comb(0, 0, 0, G_ACMUX_SHADE));
 
     if (gfx_rapi->fill_rect) {
+        /* Immediate fills must follow any buffered triangles. */
+        gfx_flush();
         gfx_pick_combiner(NULL, NULL);
         float ulxf = ulx * ratio_x;
         float ulyf = uly * ratio_y;
@@ -1931,6 +2407,7 @@ static void gfx_sp_reset() {
     rsp.modelview_matrix_stack_size = 1;
     rsp.current_num_lights = 2;
     rsp.lights_changed = true;
+    rsp.lookat_changed = true;
 }
 
 void gfx_get_dimensions(uint32_t *width, uint32_t *height) {
@@ -2006,6 +2483,12 @@ void gfx_start_frame(void) {
 void gfx_run(Gfx *commands) {
     gfx_sp_reset();
 
+#ifdef OF_DBG_SHADE
+    of_dbg_frame++;
+    if (of_dbg_frame == 3)
+        fprintf(stderr, "SHADE: captured %d main-face lines (done)\n", of_dbg_lines);
+#endif
+
     //puts("New frame");
 
     if (!gfx_wapi->start_frame()) {
@@ -2015,38 +2498,74 @@ void gfx_run(Gfx *commands) {
     dropped_frame = false;
 
 #ifdef TARGET_POCKET
-    uint32_t _t0 = *(volatile uint32_t *)0x40000004;
+    uint32_t _t0 = PROF_TMR();
     prof_vtx = prof_mtx = prof_emit = prof_tex = 0;
     prof_tex_import = g_flush_n = g_flush_sub = g_flush_tris = 0;
     g_fln_comb = g_fln_tex = g_fln_zst = g_fln_vp = 0;
 #endif
     gfx_rapi->start_frame();
+#ifdef TARGET_OPENFPGA
+    vc_slot_stale = 0xFFFFFFFFu;   /* frame start invalidates the GPU vertex cache */
+#endif
 #ifdef TARGET_POCKET
-    uint32_t _t1 = *(volatile uint32_t *)0x40000004;
+    uint32_t _t1 = PROF_TMR();
 #endif
     gfx_run_dl(commands);
 #ifdef TARGET_POCKET
-    uint32_t _t2 = *(volatile uint32_t *)0x40000004;
+    uint32_t _t2 = PROF_TMR();
 #endif
     gfx_flush();
 #ifdef TARGET_POCKET
-    uint32_t _t3 = *(volatile uint32_t *)0x40000004;
+    uint32_t _t3 = PROF_TMR();
 #endif
     gfx_rapi->end_frame();
     gfx_wapi->swap_buffers_begin();
 #ifdef TARGET_POCKET
-    uint32_t _t4 = *(volatile uint32_t *)0x40000004;
+    uint32_t _t4 = PROF_TMR();
+    uint32_t frame_ticks = _t0 - prof_prev_t0;   /* true frame-to-frame period */
+    prof_prev_t0 = _t0;
+    /* Sample ring backpressure EVERY frame (the getter resets per-call), so the
+     * printed spin/free belong to THIS frame, aligned with its timings. */
+    unsigned rspin, rfree;
+    gpu_ring_prof_get(&rspin, &rfree);
+    /* Present is now mostly idle: split it so `acq` (blocked waiting for a free
+     * draw buffer) is not mistaken for CPU work. */
+    unsigned pflip, pacq;
+    gpu_present_prof_get(&pflip, &pacq);
+    /* Vertex-cache wire cost, sampled per frame like the ring counters:
+     * words emitted on the draw path, tris via cache (0x54) vs flattened
+     * (0x4E/0x4B), and 0x56 vertex uploads. */
+    unsigned vcw, vcc, vcl, vcv;
+    gpu_vc_prof_get(&vcw, &vcc, &vcl, &vcv);
     if (tri_diag.frame % 60 == 0) {
-        printf("PROF dl=%u tot=%u | vtx=%u mtx=%u emit=%u tex=%u rest=%u\n",
-            _t2-_t1, _t4-_t0, prof_vtx, prof_mtx, prof_emit, prof_tex,
-            (_t2-_t1) - prof_vtx - prof_mtx - prof_emit - prof_tex);
-        printf("FLUSH n=%u sub=%u avgbatch=%u | tex_imp=%u tex_flush=%u\n",
-            g_flush_n, g_flush_sub,
-            g_flush_sub ? g_flush_tris / g_flush_sub : 0,
-            prof_tex_import, prof_tex - prof_tex_import);
-        printf("FLNSRC comb=%u tex=%u zst=%u vp=%u\n",
-            g_fln_comb, g_fln_tex, g_fln_zst, g_fln_vp);
+        /* Tick rate comes from the caps descriptor, NOT a constant: the
+         * 0x40000004 counter runs at the CPU clock, and this build reports
+         * cpu_freq_hz = 90 MHz.  The old hardcoded 110000 ticks/ms made every
+         * printed ms 22% LOW and every fps 22% HIGH -- which is why light frames
+         * read "36fps/27ms", i.e. faster than the 30 Hz sim cap they were
+         * actually sitting on (33.3 ms).  Confirmed independently by `acq`,
+         * which lands on one 60 Hz field once scaled correctly.
+         * other = everything outside gfx_run (game logic + audio + sim-cap
+         * idle); render = the F3DEX walk + emit; then flush and present; plus
+         * drawn tris and avg GPU batch (emit efficiency). */
+        const uint32_t hz = PROF_HZ();
+        const uint32_t tps_ms = hz / 1000u;
+        #define MS(t) ((t) / tps_ms)
+        uint32_t run = _t4 - _t0;
+        uint32_t other = frame_ticks > run ? frame_ticks - run : 0u;
+        printf("PERF f%d: %ufps %ums | other %u  render %u [vtx%u emit%u tex%u]  "
+               "flush %u  present %u [flip%u acq%u]  audio %u | tris %d batch %u  ring spin%u free%u"
+               "  vc c%u l%u v%u w%u\n",
+            tri_diag.frame,
+            frame_ticks ? hz / frame_ticks : 0u, MS(frame_ticks),
+            MS(other), MS(_t2 - _t1), MS(prof_vtx), MS(prof_emit), MS(prof_tex),
+            MS(_t3 - _t2), MS(_t4 - _t3), MS(pflip), MS(pacq), MS(g_prof_audio),
+            tri_diag.direct, g_flush_sub ? g_flush_tris / g_flush_sub : 0u,
+            rspin, rfree,
+            vcc, vcl, vcv, vcw);
+        #undef MS
     }
+    g_prof_audio = 0;
 #endif
 }
 
@@ -2056,11 +2575,7 @@ void gfx_end_frame(void) {
         gfx_wapi->swap_buffers_end();
     }
 #ifdef TARGET_POCKET
-    if (++tri_diag.frame % 60 == 0) {
-        printf("TRI f%d: tot=%d rej=%d cull=%d clip=%d dir=%d\n",
-            tri_diag.frame, tri_diag.total, tri_diag.clip_reject,
-            tri_diag.cull_reject, tri_diag.clipped, tri_diag.direct);
-    }
+    ++tri_diag.frame;
     tri_diag.total = tri_diag.clip_reject = tri_diag.cull_reject =
         tri_diag.clipped = tri_diag.direct = 0;
 #endif

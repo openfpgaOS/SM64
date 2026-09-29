@@ -1187,16 +1187,19 @@ static void apply_drag_to_value(f32 *value, f32 dragStrength) {
 
     if (*value != 0) {
         //! Can overshoot if |*value| > 1/(dragStrength * 0.0001)
-        decel = (*value) * (*value) * (dragStrength * 0.0001L);
+        // Double, as on the N64, whose long double is 64-bit. (f64) 1 / 10000
+        // stays double under -fsingle-precision-constant.
+        decel = (*value) * (*value) * (dragStrength * ((f64) 1 / 10000));
 
+        // 0.001f rounds up, so these float compares match the exact 0.001 ones.
         if (*value > 0) {
             *value -= decel;
-            if (*value < 0.001L) {
+            if (*value < 0.001f) {
                 *value = 0;
             }
         } else {
             *value += decel;
-            if (*value > -0.001L) {
+            if (*value > -0.001f) {
                 *value = 0;
             }
         }
@@ -1268,7 +1271,7 @@ static s32 cur_obj_move_xz(f32 steepSlopeNormalY, s32 careAboutEdgesAndSteepSlop
 }
 
 static void cur_obj_move_update_underwater_flags(void) {
-    f32 decelY = (f32)(sqrtf(o->oVelY * o->oVelY) * (o->oDragStrength * 7.0f)) / 100.0L;
+    f32 decelY = (f32)(sqrtf(o->oVelY * o->oVelY) * (o->oDragStrength * 7.0f)) / (f64) 100;
 
     if (o->oVelY > 0) {
         o->oVelY -= decelY;
@@ -1400,7 +1403,7 @@ static s32 clear_move_flag(u32 *bitSet, s32 flag) {
 }
 
 void cur_obj_unused_resolve_wall_collisions(f32 offsetY, f32 radius) {
-    if (radius > 0.1L) {
+    if (radius >= 0.1f) { // 0.1f rounds up: same as radius > 0.1
         f32_find_wall_collision(&o->oPosX, &o->oPosY, &o->oPosZ, offsetY, radius);
     }
 }
@@ -1709,7 +1712,7 @@ s32 cur_obj_resolve_wall_collisions(void) {
     f32 offsetY = 10.0f;
     f32 radius = o->oWallHitboxRadius;
 
-    if (radius > 0.1L) {
+    if (radius >= 0.1f) { // 0.1f rounds up: same as radius > 0.1
         collisionData.offsetY = offsetY;
         collisionData.radius = radius;
         collisionData.x = (s16) o->oPosX;

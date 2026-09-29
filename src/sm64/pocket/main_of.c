@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 /*
  * main_of.c -- openfpgaOS entry point for SM64.
  *

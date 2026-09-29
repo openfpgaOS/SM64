@@ -1,0 +1,56 @@
+{
+  "repository_head": "d8f70737ca0b52d15ab2e108bb0aeea7329a7115",
+  "baseline": "Working files saved before this task, including pre-existing uncommitted work. Fresh baseline built with the same installed SDK/toolchain.",
+  "sources": {
+    "src/sm64/Makefile": {
+      "before": "10c0a10af231f5b00f41045f949c7485b82151782dde7a10eb8ef1a95dc4508f",
+      "after": "7206d653d67980b5371b71227c0d622fcc738218143076d8fd05f9f2766ec328"
+    },
+    "src/sm64/pocket/audio_pocket.c": {
+      "before": "67cd67a1d9b9ea3fdcbdfbecefa65f6fb9de74f18d31cb5d4e4822791427868e",
+      "after": "76888a239e2aa8e7da09a77ea0c443510899e667e1a8ae2e0ea25fd38a6e3f55"
+    },
+    "src/sm64/pocket/fx32_mtx.c": {
+      "before": "ff78cf1ce2813227a9ef2e4aa028cb46fa3bec973d8f93d1754f3e9c7f75ee49",
+      "after": "21fcc98a87390569a7640bde45eff1a6c3ca75b6af4f87177263aec975858acb"
+    },
+    "src/sm64/sm64/src/pc/of_voice.c": {
+      "before": "17f257164766a43016991ccd71939f4c520f0100043f1b5c1118e99626d33184",
+      "after": "c19cf91f79990fc6e6c5412b265a0e461b72e62b235750b7242b7b8676f4209c"
+    },
+    "src/sm64/sm64/src/pc/pc_main.c": {
+      "before": "f6264a3ad9e49a4a7a119eaa31342566f0ef6a2aafedd0133fc40fd08e323149",
+      "after": "c3cbf750250754b4f14279c5e289a2134ad201d70a19f5ab6c409117270f94a6"
+    },
+    "src/sm64/sm64/src/pc/gfx/gfx_gpu.c": {
+      "before": "f554d0b8af987c82a05059cb61e6757aa25360848e7bdd22175c9b32e7d06b45",
+      "after": "54aa1297d0218f928efe615a55c6fcd0a1b0012ba25166f358b596c12aee1fa1"
+    },
+    "src/sm64/sm64/src/pc/gfx/gfx_pc.c": {
+      "before": "143ce542fa026b82fb2eddebeece90309582bfbeb66d693967943b34369e3ef1",
+      "after": "72d9691b6910ad4282177fca0c988399a99a90a95cac3f45570edd5ce584cd65"
+    },
+    "src/sm64/sm64/src/pc/gfx/gfx_gpu.h": {
+      "before": "c577dec36504cfa0172a283434b580e746dc0530d18e1301776697c027a32af8",
+      "after": "57f73c1fe302a804e6c5d88c6cb687dff9d6dc5d0c1751df8ea087e67cf8df30"
+    }
+  },
+  "artifacts": {
+    "normal": {
+      "path": "/home/alberto/Repos/SM64/.obj/sm64/app.elf",
+      "bytes": 13588324,
+      "sha256": "0f19cd4bbc504d6fd4d2e5eb19ea4e22130ad21d2a158c6571a6bdc82b20d050"
+    },
+    "profile": {
+      "path": "/home/alberto/Repos/SM64/.obj/sm64-profile/app.elf",
+      "bytes": 13581800,
+      "sha256": "95e14ff1178943607a770aad9a21a7a6223d49dfb3c923cb6b8251bd2ef3d37d"
+    },
+    "baseline": {
+      "path": "/home/alberto/.cache/sm64-optimization-20260913/baseline-obj/app.elf",
+      "bytes": 13587636,
+      "sha256": "56ee380d975d2f8e98aae95aa492079989374125571c14cbbec879e4ee858d58"
+    }
+  },
+  "hardware": "SS1 192.168.1.245 unreachable; no FPGA measurements or deployment."
+}

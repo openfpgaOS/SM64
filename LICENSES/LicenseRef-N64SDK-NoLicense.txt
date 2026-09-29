@@ -1,0 +1,78 @@
+LicenseRef-N64SDK-NoLicense
+===========================
+
+THIS IS NOT A LICENSE. It is a statement of fact about material in this
+repository for which NO LICENSE HAS BEEN GRANTED BY ANYONE.
+
+What this identifier marks
+--------------------------
+
+Nintendo 64 SDK material vendored under src/sm64/sm64/, namely:
+
+  * include/PR/**            libultra / Fast3D public headers
+  * lib/asm/**, lib/src/**   libultra (the N64 operating system library),
+                             as decompiled/reconstructed by the decomp project
+  * tools/sdk-tools/**       a decompilation of Nintendo's N64 SDK developer
+                             tools (adpcm, tabledesign); see its README.md
+  * lib/PR/**                RSP microcode BINARIES (24 .bin files)     [1]
+  * lib/rsp.s, rsp/**        RSP microcode sources / build glue         [1]
+
+  [1] These paths were removed from this repository's git index while this
+      notice was being written (the working-tree copies were deleted and the
+      deletions staged). The rules covering them are retained in REUSE.toml so
+      that they remain correctly classified in history and if the paths ever
+      return. If the paths are absent in your checkout, the corresponding
+      rules simply match nothing.
+
+Evidence of provenance (verified in-tree, not assumed)
+------------------------------------------------------
+
+include/PR/gbi.h and its siblings carry this header verbatim:
+
+    Copyright (C) 1994, Silicon Graphics, Inc.
+
+    These coded instructions, statements, and computer programs contain
+    unpublished proprietary information of Silicon Graphics, Inc., and
+    are protected by Federal copyright law. They may not be disclosed
+    to third parties or copied or duplicated in any form, in whole or
+    in part, without the prior written consent of Silicon Graphics, Inc.
+
+That is an explicit reservation of rights and an explicit prohibition on
+copying. It is the opposite of a license grant.
+
+The microcode binaries under lib/PR/ contained embedded Nintendo authorship
+strings; the following were read directly out of the tracked files before they
+were removed:
+
+    lib/PR/f3dex/F3DEX_NoN_data.bin
+        "RSP Gfx ucode F3DEX.NoN     1.23 Yoshitaka Yasumoto Nintendo."
+    lib/PR/f3dex2/F3DEX2_data.bin
+        "RSP Gfx ucode F3DEX       fifo 2.08  Yoshitaka Yasumoto 1999 Nintendo."
+    lib/PR/s2dex/S2DEX_data.bin
+        "RSP Gfx ucode S2DEX  1.07 Yoshitaka Yasumoto Nintendo."
+
+These are unmodified Nintendo binaries, not clean-room reimplementations.
+
+Copyright status
+----------------
+
+Copyright (C) Silicon Graphics, Inc. and/or Nintendo Co., Ltd.
+All rights reserved. No license has been granted to this project or to the
+upstream decompilation projects it vendors.
+
+  * There is no permission, from any rights holder, to copy, modify, or
+    redistribute this material.
+  * The Apache-2.0 grant this project makes for its OWN work does NOT extend
+    to this material.
+  * This material is present here because the upstream sm64 decompilation and
+    the sm64-port forks track it; it is redistributed at the redistributor's
+    own risk.
+
+Note that lib/PR/**/*.bin in particular were Nintendo-authored binaries, so the
+"source only" distribution policy of this repository did not cure their
+status -- they had no source form here at all. That is presumably why they
+have since been removed from the index; note that removing them from the tip
+does not remove them from git history.
+
+If you are a rights holder and believe material here should not be
+distributed, please contact the repository owner.

@@ -3,6 +3,7 @@
 #include "sm64.h"
 #include "area.h"
 #include "engine/graph_node.h"
+#include "engine/math_util.h"   /* sins/coss: see calculate_ripple_at_point */
 #include "engine/surface_collision.h"
 #include "game_init.h"
 #include "geo_misc.h"
@@ -633,7 +634,22 @@ s16 calculate_ripple_at_point(struct Painting *painting, f32 posX, f32 posY) {
     } else {
         // use a cosine wave to make the ripple go up and down,
         // scaled by the painting's ripple magnitude
-        f32 rippleZ = rippleMag * cosf(rippleRate * (2 * M_PI) * (rippleTimer - rippleDistance));
+        /* cosf() is a ~600-1500 cycle call on rv32imafc (musl computes float
+         * transcendentals in DOUBLE -> libgcc soft-float; no D extension here),
+         * and this runs once PER PAINTING MESH VERTEX PER FRAME -- 157-264
+         * vertices per rippling painting, i.e. milliseconds per frame in the
+         * castle.  SM64's own coss() table costs one load.
+         *
+         * The argument is a phase: rippleRate*(rippleTimer-rippleDistance) is
+         * the count of full cycles, so scaling by 65536 gives the binary angle
+         * coss() wants -- and taking the fractional turn first makes the
+         * float->int conversion overflow-proof for an unbounded rippleTimer
+         * (the old cosf() relied on its own argument reduction for that).
+         * Accuracy: 1/4096-turn table step * rippleMag (<= ~20) is far below
+         * the s16 that round_float() truncates this to. */
+        f32 rippleTurns = rippleRate * (rippleTimer - rippleDistance);  /* >= 0, see above */
+        rippleTurns -= (f32) (s32) rippleTurns;                         /* keep the fraction */
+        f32 rippleZ = rippleMag * coss((s16) (s32) (rippleTurns * 65536.0f));
 
         // round it to an int and return it
         return round_float(rippleZ);

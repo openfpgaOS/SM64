@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 /*
  * printf_pocket.c -- printf/puts routing for PocketSM64
  * Routes formatted output to the terminal display.

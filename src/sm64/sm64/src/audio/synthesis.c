@@ -307,6 +307,7 @@ u64 *synthesis_execute(u64 *cmdBuf, s32 *writtenCmds, s16 *aiBuf, s32 bufLen) {
     return cmd;
 }
 #else
+extern void of_voice_sync(void);   /* pc/of_voice.c: HW-mixer per-note backend */
 // bufLen will be divisible by 16
 u64 *synthesis_execute(u64 *cmdBuf, s32 *writtenCmds, s16 *aiBuf, s32 bufLen) {
     s32 chunkLen;
@@ -334,10 +335,14 @@ u64 *synthesis_execute(u64 *cmdBuf, s32 *writtenCmds, s16 *aiBuf, s32 bufLen) {
         if (gSynthesisReverb.useReverb != 0) {
             prepare_reverb_ring_buffer(chunkLen, gAudioUpdatesPerFrame - i);
         }
-        cmd = synthesis_do_one_audio_update((s16 *) aiBufPtr, chunkLen, cmd, gAudioUpdatesPerFrame - i);
+        /* HW-voice backend: the CPU software render (synthesis_do_one_audio_update)
+         * is replaced by of_voice_sync() after the loop -- HW voices do the
+         * resample/envelope/mix.  aiBuf is left unrendered; audio_pocket's play()
+         * is count-only (paces the seq), so its contents are never output. */
         bufLen -= chunkLen;
         aiBufPtr += chunkLen;
     }
+    of_voice_sync();
     if (gSynthesisReverb.framesLeftToIgnore != 0) {
         gSynthesisReverb.framesLeftToIgnore--;
     }
@@ -760,6 +765,16 @@ u64 *synthesis_process_notes(s16 *aiBuf, s32 bufLen, u64 *cmd) {
                 endPos = loopInfo->end;
                 sampleAddr = audioBookSample->sampleAddr;
                 resampledTempLen = 0;
+#ifndef VERSION_EU
+                /* Pre-decoded S16 PCM for this sample (decoded once on first use),
+                 * or NULL to use the runtime VADPCM decode. */
+                const s16 *predecodePcm = SM64_AUDIO_PREDECODE
+                    ? audio_predecode_get((const u8 *) sampleAddr, audioBookSample->book->book,
+                          audioBookSample->book->order, audioBookSample->book->npredictors,
+                          audioBookSample->sampleSize,
+                          loopInfo->start, loopInfo->count, loopInfo->state)
+                    : NULL;
+#endif
                 for (curPart = 0; curPart < nParts; curPart++) {
                     nAdpcmSamplesProcessed = 0; // s8
                     s5 = 0;                     // s4
@@ -842,6 +857,7 @@ u64 *synthesis_process_notes(s16 *aiBuf, s32 bufLen, u64 *cmd) {
                         }
 
                         if (t0 != 0) {
+                            int doCompressedLoad = 1;
 #ifdef VERSION_EU
                             temp = (synthesisState->samplePosInt - s2 + 0x10) / 16;
                             if (audioBookSample->loaded == 0x81) {
@@ -853,13 +869,21 @@ u64 *synthesis_process_notes(s16 *aiBuf, s32 bufLen, u64 *cmd) {
                             }
 #else
                             temp = (note->samplePosInt - s2 + 0x10) / 16;
-                            v0_2 = dma_sample_data(
-                                (uintptr_t) (sampleAddr + temp * 9),
-                                t0 * 9, flags, &note->sampleDmaIndex);
+                            if (predecodePcm != NULL) {
+                                doCompressedLoad = 0; /* PCM passthrough: skip compressed DMA/load */
+                            } else {
+                                v0_2 = dma_sample_data(
+                                    (uintptr_t) (sampleAddr + temp * 9),
+                                    t0 * 9, flags, &note->sampleDmaIndex);
+                            }
 #endif
-                            a3 = (u32)((uintptr_t) v0_2 & 0xf);
-                            aSetBuffer(cmd++, 0, DMEM_ADDR_COMPRESSED_ADPCM_DATA, 0, t0 * 9 + a3);
-                            aLoadBuffer(cmd++, VIRTUAL_TO_PHYSICAL2(v0_2 - a3));
+                            if (doCompressedLoad) {
+                                a3 = (u32)((uintptr_t) v0_2 & 0xf);
+                                aSetBuffer(cmd++, 0, DMEM_ADDR_COMPRESSED_ADPCM_DATA, 0, t0 * 9 + a3);
+                                aLoadBuffer(cmd++, VIRTUAL_TO_PHYSICAL2(v0_2 - a3));
+                            } else {
+                                a3 = 0;
+                            }
                         } else {
                             s0 = 0;
                             a3 = 0;
@@ -897,6 +921,10 @@ u64 *synthesis_process_notes(s16 *aiBuf, s32 bufLen, u64 *cmd) {
                                       DMEM_ADDR_UNCOMPRESSED_NOTE + s5, (nSamplesInThisIteration) * 2);
                         }
 #else
+                        /* For a pre-decoded sample, point aADPCMdec at the PCM frames
+                         * (frame `temp` = sample temp*16); NULL = normal ADPCM decode. */
+                        aSetPredecode(cmd++, (predecodePcm != NULL && t0 != 0)
+                                                ? predecodePcm + temp * 16 : NULL);
                         if (nAdpcmSamplesProcessed == 0) {
                             aSetBuffer(cmd++, 0, DMEM_ADDR_COMPRESSED_ADPCM_DATA + a3, DMEM_ADDR_UNCOMPRESSED_NOTE, s0 * 2);
                             aADPCMdec(cmd++, flags, VIRTUAL_TO_PHYSICAL2(note->synthesisBuffers->adpcmdecState));
